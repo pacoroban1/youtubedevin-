@@ -1,0 +1,122 @@
+flowchart TB
+    subgraph Discovery["Part A: Channel Discovery"]
+        A1[YouTube Data API Search] --> A2[Fetch Channel Stats]
+        A2 --> A3[Calculate Composite Score]
+        A3 --> A4[Select Top 10 Channels]
+        A4 --> A5[Get Top N Videos per Channel]
+        A5 --> A6[(PostgreSQL: channels, videos)]
+    end
+
+    subgraph Ingest["Part B: Video Ingest"]
+        B1[yt-dlp Download Video] --> B2{YouTube Captions?}
+        B2 -->|Yes| B3[Extract Captions]
+        B2 -->|No| B4[Whisper/Gemini Transcribe]
+        B3 --> B5[Clean Transcript]
+        B4 --> B5
+        B5 --> B6[Detect Language]
+        B6 --> B7[(PostgreSQL: transcripts)]
+    end
+
+    subgraph Script["Part C: Amharic Script"]
+        C1[Load Transcript] --> C2[Gemini: Generate Hook]
+        C2 --> C3[Gemini: Main Recap Segments]
+        C3 --> C4[Gemini: Payoff + CTA]
+        C4 --> C5[LLM Quality Check]
+        C5 --> C6{Score >= 90?}
+        C6 -->|Yes| C7[(PostgreSQL: scripts)]
+        C6 -->|No| C8[Regenerate/Refine]
+        C8 --> C2
+    end
+
+    subgraph Voice["Part D: Voice Generation"]
+        D1[Load Amharic Script] --> D2[Azure TTS: am-ET-AmehaNeural]
+        D2 --> D3[Generate Audio Segments]
+        D3 --> D4[Concatenate Audio]
+        D4 --> D5[Normalize to -14 LUFS]
+        D5 --> D6[Quality Check]
+        D6 --> D7{No Clipping?}
+        D7 -->|Yes| D8[(PostgreSQL: audio)]
+        D7 -->|No| D9[Adjust & Regenerate]
+        D9 --> D2
+    end
+
+    subgraph Timing["Part E: Timing & Scene Match"]
+        E1[Load Source Video] --> E2[FFmpeg Scene Detection]
+        E2 --> E3[Forced Alignment: stable-ts]
+        E3 --> E4[Map Narration to Scenes]
+        E4 --> E5{Alignment >= 0.7?}
+        E5 -->|Yes| E6[FFmpeg Render Final Video]
+        E5 -->|No| E7[Compress/Expand Script]
+        E7 --> E3
+        E6 --> E8[(PostgreSQL: renders)]
+    end
+
+    subgraph Thumbnail["Part F: Thumbnail"]
+        F1[Gemini: 3 Amharic Hooks] --> F2[Extract Key Frames]
+        F2 --> F3[PIL: Overlay Text]
+        F3 --> F4[Calculate Heuristic Score]
+        F4 --> F5[Select Best Thumbnail]
+        F5 --> F6[(PostgreSQL: thumbnails)]
+    end
+
+    subgraph Upload["Part G: YouTube Upload"]
+        G1[Gemini: 3 Title Candidates] --> G2[Generate Description + Tags]
+        G2 --> G3[Generate Chapters]
+        G3 --> G4[YouTube API: Upload Video]
+        G4 --> G5[Upload Thumbnail]
+        G5 --> G6[Add to Playlist]
+        G6 --> G7[(PostgreSQL: uploads)]
+    end
+
+    subgraph Growth["Part H: Growth Loop"]
+        H1[Post to Telegram] --> H2[Post to X/Twitter]
+        H2 --> H3[Fetch Early Metrics]
+        H3 --> H4[A/B Test Setup]
+        H4 --> H5[Generate Suggestions]
+        H5 --> H6[(PostgreSQL: metrics, ab_tests)]
+    end
+
+    subgraph Report["Daily Report"]
+        R1[Aggregate Daily Stats] --> R2[Generate Recommendations]
+        R2 --> R3[Format Markdown Report]
+        R3 --> R4[Send to Telegram]
+        R4 --> R5[(PostgreSQL: daily_reports)]
+    end
+
+    %% Flow connections
+    Discovery --> Ingest
+    Ingest --> Script
+    Script --> Voice
+    Voice --> Timing
+    Timing --> Thumbnail
+    Thumbnail --> Upload
+    Upload --> Growth
+    Growth --> Report
+
+    %% n8n Orchestration
+    subgraph n8n["n8n Orchestration"]
+        N1[Schedule Trigger: Daily] --> N2[Discovery Workflow]
+        N2 --> N3[Full Pipeline Workflow]
+        N3 --> N4[Daily Report Workflow]
+    end
+
+    n8n -.->|orchestrates| Discovery
+    n8n -.->|orchestrates| Ingest
+    n8n -.->|orchestrates| Script
+    n8n -.->|orchestrates| Voice
+    n8n -.->|orchestrates| Timing
+    n8n -.->|orchestrates| Thumbnail
+    n8n -.->|orchestrates| Upload
+    n8n -.->|orchestrates| Growth
+    n8n -.->|orchestrates| Report
+
+    %% Styling
+    classDef api fill:#e1f5fe,stroke:#01579b
+    classDef db fill:#fff3e0,stroke:#e65100
+    classDef gate fill:#ffebee,stroke:#c62828
+    classDef success fill:#e8f5e9,stroke:#2e7d32
+
+    class A1,D2,G4 api
+    class A6,B7,C7,D8,E8,F6,G7,H6,R5 db
+    class C6,D7,E5 gate
+    class E6,G6 success

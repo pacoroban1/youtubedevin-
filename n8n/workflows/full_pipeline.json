@@ -1,0 +1,382 @@
+{
+  "name": "Amharic Recap - Full Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "process-video",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "amharic-recap-process"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/ingest/{{ $json.body.video_id }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "ingest-video",
+      "name": "1. Ingest Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "success"
+            }
+          ]
+        }
+      },
+      "id": "check-ingest",
+      "name": "Check Ingest",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/script/{{ $json.video_id }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "generate-script",
+      "name": "2. Generate Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.quality_score }}",
+              "operation": "largerEqual",
+              "value2": 0.9
+            }
+          ]
+        }
+      },
+      "id": "quality-gate-script",
+      "name": "Quality Gate: Script",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/voice/{{ $json.video_id }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "generate-voice",
+      "name": "3. Generate Voice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.quality_passed }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "quality-gate-audio",
+      "name": "Quality Gate: Audio",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/render/{{ $json.video_id }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "render-video",
+      "name": "4. Render Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.alignment_score }}",
+              "operation": "largerEqual",
+              "value2": 0.7
+            }
+          ]
+        }
+      },
+      "id": "quality-gate-timing",
+      "name": "Quality Gate: Timing",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1850, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/thumbnail/{{ $json.video_id }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "generate-thumbnail",
+      "name": "5. Generate Thumbnail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2050, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/upload/{{ $json.video_id }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "upload-video",
+      "name": "6. Upload to YouTube",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2250, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/distribute/{{ $json.video_id }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "distribute-video",
+      "name": "7. Distribute",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2450, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'success', video_id: $json.video_id, youtube_url: $json.youtube_url, platforms: $json.platforms }) }}"
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2650, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'failed', error: 'Quality gate failed', step: $node.name }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "quality-failed-response",
+      "name": "Quality Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1450, 500]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "1. Ingest Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Ingest Video": {
+      "main": [
+        [
+          {
+            "node": "Check Ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Ingest": {
+      "main": [
+        [
+          {
+            "node": "2. Generate Script",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quality Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Generate Script": {
+      "main": [
+        [
+          {
+            "node": "Quality Gate: Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quality Gate: Script": {
+      "main": [
+        [
+          {
+            "node": "3. Generate Voice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quality Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Generate Voice": {
+      "main": [
+        [
+          {
+            "node": "Quality Gate: Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quality Gate: Audio": {
+      "main": [
+        [
+          {
+            "node": "4. Render Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quality Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Render Video": {
+      "main": [
+        [
+          {
+            "node": "Quality Gate: Timing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quality Gate: Timing": {
+      "main": [
+        [
+          {
+            "node": "5. Generate Thumbnail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quality Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Generate Thumbnail": {
+      "main": [
+        [
+          {
+            "node": "6. Upload to YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Upload to YouTube": {
+      "main": [
+        [
+          {
+            "node": "7. Distribute",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7. Distribute": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["amharic-recap", "full-pipeline"],
+  "triggerCount": 1,
+  "updatedAt": "2026-02-04T00:00:00.000Z",
+  "versionId": "1"
+}

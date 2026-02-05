@@ -1,0 +1,137 @@
+{
+  "name": "Amharic Recap - Daily Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hour": 23
+            }
+          ]
+        }
+      },
+      "id": "daily-schedule",
+      "name": "Daily at 11 PM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://runner:8000/api/report/daily",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "generate-report",
+      "name": "Generate Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "success"
+            }
+          ]
+        }
+      },
+      "id": "check-report",
+      "name": "Check Report",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHANNEL_ID }}",
+        "text": "=📊 Daily Report - {{ $json.report.date }}\n\n📹 Videos Produced: {{ $json.report.summary.videos_produced }}\n📤 Videos Uploaded: {{ $json.report.summary.videos_uploaded }}\n👀 Total Views: {{ $json.report.summary.total_views }}\n📈 Avg CTR: {{ $json.report.summary.avg_ctr }}%\n\n💡 Recommendations:\n{{ $json.report.recommendations.join('\\n') }}",
+        "additionalFields": {}
+      },
+      "id": "send-telegram",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [850, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE daily_reports SET report_json = '{{ JSON.stringify($json.report) }}' WHERE report_date = CURRENT_DATE",
+        "options": {}
+      },
+      "id": "save-report",
+      "name": "Save Report",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [850, 400],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily at 11 PM": {
+      "main": [
+        [
+          {
+            "node": "Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Report": {
+      "main": [
+        [
+          {
+            "node": "Check Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Report": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["amharic-recap", "reporting"],
+  "triggerCount": 1,
+  "updatedAt": "2026-02-04T00:00:00.000Z",
+  "versionId": "1"
+}

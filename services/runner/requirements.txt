@@ -1,0 +1,48 @@
+# Web framework
+fastapi==0.109.0
+uvicorn==0.27.0
+python-multipart==0.0.6
+
+# Database
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.25
+
+# YouTube API
+google-api-python-client==2.114.0
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+
+# Azure Speech TTS
+azure-cognitiveservices-speech==1.34.0
+
+# Google Gemini
+google-generativeai==0.3.2
+
+# OpenAI (optional, for thumbnails)
+openai==1.10.0
+
+# Audio processing
+pydub==0.25.1
+numpy==1.26.3
+scipy==1.12.0
+
+# Video/Scene detection
+scenedetect==0.6.2
+opencv-python-headless==4.9.0.80
+
+# Whisper for transcription fallback
+openai-whisper==20231117
+
+# HTTP requests
+httpx==0.26.0
+aiohttp==3.9.1
+
+# Utilities
+python-dotenv==1.0.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+Pillow==10.2.0
+requests==2.31.0
+
+# Forced alignment
+stable-ts==2.15.0
