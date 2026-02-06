@@ -60,6 +60,9 @@ See `.env.example` for all required variables:
 | `TELEGRAM_CHANNEL_ID` | (Optional) Telegram channel ID |
 | `TWITTER_*` | (Optional) Twitter API credentials |
 | `ZTHUMB_URL` | (Optional) ZThumb local thumbnail engine URL |
+| `ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI` | (Optional) Allow paid DALL·E fallback if ZThumb is configured but unavailable |
+| `Z_LORA_PATH` | (Optional) ZThumb LoRA adapter path (inside ZThumb container) |
+| `Z_LORA_SCALE` | (Optional) ZThumb LoRA scale (default recommended ~0.8) |
 
 ## Services
 
@@ -189,6 +192,26 @@ curl -X POST http://localhost:8100/generate \
 ### Integration with Autopilot
 
 Set `ZTHUMB_URL=http://localhost:8100` in your `.env` file to use ZThumb for thumbnail generation instead of OpenAI DALL-E.
+By default, if `ZTHUMB_URL` is set and ZThumb is down, thumbnail generation fails (so you can retry) instead of silently paying for DALL·E.
+To opt into the paid fallback explicitly, set `ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI=true`.
+
+### LoRA Fine-Tune (Optional)
+
+ZThumb can load a LoRA adapter at inference time:
+
+```bash
+export Z_LORA_PATH=/outputs/lora/zthumb_lora
+export Z_LORA_SCALE=0.8
+```
+
+And you can run the end-to-end loop:
+
+```bash
+make train_lora
+make eval_lora
+make run_zthumb
+make test_generate
+```
 
 ## File Structure
 

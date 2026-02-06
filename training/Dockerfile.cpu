@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+WORKDIR /workspace
+
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    git \\
+    curl \\
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.base.txt requirements.base.txt
+COPY requirements.cpu.txt requirements.cpu.txt
+RUN pip install --no-cache-dir -r requirements.cpu.txt
+
+COPY prepare_dataset.py train_lora.py eval_lora.py ./
+
+ENTRYPOINT ["python3"]
+
