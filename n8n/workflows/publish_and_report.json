@@ -1,0 +1,175 @@
+{
+  "name": "Amharic Recap - Publish and Report",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "publish-video",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "publish-and-report"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/upload/{{ $json.body.video_id }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "upload-video",
+      "name": "1. Upload to YouTube",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "success"
+            }
+          ]
+        }
+      },
+      "id": "check-upload",
+      "name": "Upload OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/distribute/{{ $('Webhook Trigger').item.json.body.video_id }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "distribute-video",
+      "name": "2. Distribute (Telegram/X)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://runner:8000/api/report/daily",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "generate-report",
+      "name": "3. Generate Daily Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'success', video_id: $('Webhook Trigger').item.json.body.video_id, youtube_video_id: $('1. Upload to YouTube').item.json.youtube_video_id, youtube_url: 'https://youtube.com/watch?v=' + $('1. Upload to YouTube').item.json.youtube_video_id, distributed_to: $('2. Distribute (Telegram/X)').item.json.distributed_to, report: $json.report }) }}"
+      },
+      "id": "success-response",
+      "name": "Publish Complete",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'failed', error: 'Upload failed', details: $json }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "upload-failed",
+      "name": "Upload Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [850, 500]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "1. Upload to YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Upload to YouTube": {
+      "main": [
+        [
+          {
+            "node": "Upload OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload OK?": {
+      "main": [
+        [
+          {
+            "node": "2. Distribute (Telegram/X)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upload Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Distribute (Telegram/X)": {
+      "main": [
+        [
+          {
+            "node": "3. Generate Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Generate Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Publish Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["amharic-recap", "publish", "report"],
+  "triggerCount": 1,
+  "updatedAt": "2026-02-06T00:00:00.000Z",
+  "versionId": "1"
+}

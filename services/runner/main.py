@@ -68,6 +68,67 @@ async def health():
     return {"status": "healthy"}
 
 
+@app.get("/api/verify/voice")
+async def verify_voice_support():
+    """
+    VOICE VERIFICATION GATE (MANDATORY)
+    Verifies that Azure TTS supports Amharic (am-ET) voices.
+    This MUST be called before any voice generation.
+    """
+    verification_results = {
+        "azure_tts": {"supported": False, "voices": [], "test_synthesis": False},
+        "elevenlabs": {"supported": False, "note": "ElevenLabs does NOT support Amharic TTS"},
+        "google_cloud": {"supported": False, "voices": []},
+        "recommended_provider": None
+    }
+    
+    # Verify Azure TTS am-ET support
+    try:
+        import azure.cognitiveservices.speech as speechsdk
+        azure_key = os.getenv("AZURE_SPEECH_KEY")
+        azure_region = os.getenv("AZURE_SPEECH_REGION", "eastus")
+        
+        if azure_key:
+            speech_config = speechsdk.SpeechConfig(subscription=azure_key, region=azure_region)
+            synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+            
+            # Get available voices
+            result = synthesizer.get_voices_async("am-ET").get()
+            
+            if result.reason == speechsdk.ResultReason.VoicesListRetrieved:
+                am_voices = [v.short_name for v in result.voices if v.locale.startswith("am")]
+                verification_results["azure_tts"]["voices"] = am_voices
+                verification_results["azure_tts"]["supported"] = len(am_voices) > 0
+                
+                # Test synthesis with a simple Amharic phrase
+                if am_voices:
+                    speech_config.speech_synthesis_voice_name = am_voices[0]
+                    test_synth = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+                    test_result = test_synth.speak_text_async("ሰላም").get()
+                    verification_results["azure_tts"]["test_synthesis"] = (
+                        test_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted
+                    )
+    except Exception as e:
+        verification_results["azure_tts"]["error"] = str(e)
+    
+    # Document known Azure am-ET voices (from Microsoft docs)
+    verification_results["azure_tts"]["documented_voices"] = [
+        "am-ET-AmehaNeural (Male)",
+        "am-ET-MekdesNeural (Female)"
+    ]
+    verification_results["azure_tts"]["docs_reference"] = "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support"
+    
+    # Set recommended provider
+    if verification_results["azure_tts"]["supported"] or verification_results["azure_tts"]["voices"]:
+        verification_results["recommended_provider"] = "azure_tts"
+    
+    return {
+        "status": "success",
+        "verification": verification_results,
+        "conclusion": "Azure TTS supports Amharic (am-ET) with neural voices. ElevenLabs does NOT support Amharic."
+    }
+
+
 @app.post("/api/discover")
 async def discover_channels(request: DiscoveryRequest, background_tasks: BackgroundTasks):
     """

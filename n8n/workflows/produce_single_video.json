@@ -1,0 +1,406 @@
+{
+  "name": "Amharic Recap - Produce Single Video",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "produce-video",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "produce-single-video"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://runner:8000/api/verify/voice",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "verify-voice",
+      "name": "0. Verify Voice Support",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.verification.recommended_provider }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "check-voice-support",
+      "name": "Voice Supported?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/ingest/{{ $('Webhook Trigger').item.json.body.video_id }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "ingest-video",
+      "name": "1. Ingest Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "success"
+            }
+          ]
+        }
+      },
+      "id": "check-ingest",
+      "name": "Ingest OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/script/{{ $('Webhook Trigger').item.json.body.video_id }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "generate-script",
+      "name": "2. Generate Amharic Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.quality_score }}",
+              "operation": "largerEqual",
+              "value2": 90
+            }
+          ]
+        }
+      },
+      "id": "quality-gate-script",
+      "name": "Script Quality >= 90?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/voice/{{ $('Webhook Trigger').item.json.body.video_id }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "generate-voice",
+      "name": "3. Generate Voice (Azure TTS)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.quality_passed }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "quality-gate-audio",
+      "name": "Audio Quality OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1850, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/render/{{ $('Webhook Trigger').item.json.body.video_id }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "render-video",
+      "name": "4. Render Video (Scene Match)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2050, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.alignment_score }}",
+              "operation": "largerEqual",
+              "value2": 0.7
+            }
+          ]
+        }
+      },
+      "id": "quality-gate-timing",
+      "name": "Alignment >= 0.7?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2250, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://runner:8000/api/thumbnail/{{ $('Webhook Trigger').item.json.body.video_id }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "generate-thumbnail",
+      "name": "5. Generate 3 Thumbnails",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2450, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'success', video_id: $('Webhook Trigger').item.json.body.video_id, output_file: $json.output_file, thumbnails: $json.thumbnails_generated, ready_for_upload: true }) }}"
+      },
+      "id": "success-response",
+      "name": "Production Complete",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2650, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'failed', error: 'Voice verification failed - Amharic TTS not available' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "voice-not-supported",
+      "name": "Voice Not Supported",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [850, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'failed', error: 'Quality gate failed', step: $node.name, details: $json }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "quality-failed",
+      "name": "Quality Gate Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1650, 500]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "0. Verify Voice Support",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "0. Verify Voice Support": {
+      "main": [
+        [
+          {
+            "node": "Voice Supported?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Voice Supported?": {
+      "main": [
+        [
+          {
+            "node": "1. Ingest Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Voice Not Supported",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Ingest Video": {
+      "main": [
+        [
+          {
+            "node": "Ingest OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ingest OK?": {
+      "main": [
+        [
+          {
+            "node": "2. Generate Amharic Script",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quality Gate Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Generate Amharic Script": {
+      "main": [
+        [
+          {
+            "node": "Script Quality >= 90?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Script Quality >= 90?": {
+      "main": [
+        [
+          {
+            "node": "3. Generate Voice (Azure TTS)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quality Gate Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Generate Voice (Azure TTS)": {
+      "main": [
+        [
+          {
+            "node": "Audio Quality OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio Quality OK?": {
+      "main": [
+        [
+          {
+            "node": "4. Render Video (Scene Match)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quality Gate Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Render Video (Scene Match)": {
+      "main": [
+        [
+          {
+            "node": "Alignment >= 0.7?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alignment >= 0.7?": {
+      "main": [
+        [
+          {
+            "node": "5. Generate 3 Thumbnails",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quality Gate Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Generate 3 Thumbnails": {
+      "main": [
+        [
+          {
+            "node": "Production Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["amharic-recap", "production"],
+  "triggerCount": 1,
+  "updatedAt": "2026-02-06T00:00:00.000Z",
+  "versionId": "1"
+}

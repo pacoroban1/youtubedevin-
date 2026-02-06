@@ -1,6 +1,7 @@
 """
 Part F: Thumbnail Generation Module
 Generates superb thumbnails with Amharic hooks.
+Supports ZThumb local engine when ZTHUMB_URL is set.
 """
 
 import os
@@ -9,6 +10,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import json
 
+import httpx
+
 
 class ThumbnailGenerator:
     def __init__(self, db):
@@ -16,6 +19,9 @@ class ThumbnailGenerator:
         self.media_dir = os.getenv("MEDIA_DIR", "/app/media")
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.gemini_api_key = os.getenv("GEMINI_API_KEY")
+        
+        # ZThumb local engine URL (if set, use local generation)
+        self.zthumb_url = os.getenv("ZTHUMB_URL")
         
         # Thumbnail specs
         self.width = 1280
@@ -64,8 +70,11 @@ class ThumbnailGenerator:
                 base_image = key_frames[i]
                 await self._create_thumbnail_with_text(base_image, hook, thumb_path)
             else:
-                # Generate thumbnail using AI
-                await self._generate_ai_thumbnail(video_title, hook, thumb_path)
+                # Generate thumbnail using AI (prefer ZThumb if available)
+                if self.zthumb_url:
+                    await self._generate_zthumb_thumbnail(video_title, hook, thumb_path)
+                else:
+                    await self._generate_ai_thumbnail(video_title, hook, thumb_path)
             
             # Calculate heuristic score
             score = await self._calculate_heuristic_score(thumb_path)
@@ -286,13 +295,80 @@ Return ONLY 3 hooks, one per line, nothing else."""
             shutil.copy(base_image, output_path)
             return False
     
+    async def _generate_zthumb_thumbnail(
+        self,
+        video_title: str,
+        hook_text: str,
+        output_path: str
+    ) -> bool:
+        """
+        Generate thumbnail using ZThumb local engine.
+        Falls back to OpenAI if ZThumb is unavailable.
+        """
+        if not self.zthumb_url:
+            return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+        
+        try:
+            # Build prompt for cinematic thumbnail
+            prompt = f"cinematic movie poster, dramatic scene, {video_title}, high contrast lighting, volumetric fog, 8k, photorealistic, movie quality"
+            
+            payload = {
+                "prompt": prompt,
+                "negative_prompt": "text, watermark, logo, blurry, low quality, cartoon, anime, deformed hands",
+                "width": self.width,
+                "height": self.height,
+                "batch": 3,  # Generate 3 variants
+                "steps": 35,
+                "cfg": 4.5,
+                "variant": "auto",
+                "upscale": True,
+                "face_detail": True,
+                "safe_mode": True,
+                "style_preset": "alien_reveal"
+            }
+            
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                response = await client.post(
+                    f"{self.zthumb_url}/generate",
+                    json=payload
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                if result.get("warnings"):
+                    print(f"ZThumb warnings: {result['warnings']}")
+                
+                images = result.get("images", [])
+                if not images:
+                    print("ZThumb returned no images, falling back to OpenAI")
+                    return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+                
+                # Get the first image (best one based on ZThumb scoring)
+                best_image = images[0].replace("file://", "")
+                
+                # Copy to output path and add text overlay
+                import shutil
+                shutil.copy(best_image, output_path)
+                
+                # Add Amharic text overlay
+                await self._add_text_overlay(output_path, hook_text)
+                
+                return True
+                
+        except httpx.ConnectError:
+            print(f"ZThumb server not available at {self.zthumb_url}, falling back to OpenAI")
+            return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+        except Exception as e:
+            print(f"ZThumb generation error: {e}, falling back to OpenAI")
+            return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+    
     async def _generate_ai_thumbnail(
         self,
         video_title: str,
         hook_text: str,
         output_path: str
     ) -> bool:
-        """Generate thumbnail using AI image generation."""
+        """Generate thumbnail using AI image generation (OpenAI DALL-E)."""
         if not self.openai_api_key:
             return await self._create_placeholder_thumbnail(hook_text, output_path)
         
