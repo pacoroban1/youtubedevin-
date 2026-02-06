@@ -59,6 +59,7 @@ See `.env.example` for all required variables:
 | `TELEGRAM_BOT_TOKEN` | (Optional) Telegram bot token for distribution |
 | `TELEGRAM_CHANNEL_ID` | (Optional) Telegram channel ID |
 | `TWITTER_*` | (Optional) Twitter API credentials |
+| `ZTHUMB_URL` | (Optional) ZThumb local thumbnail engine URL |
 
 ## Services
 
@@ -148,6 +149,47 @@ docker-compose exec runner pytest
 docker-compose exec runner pytest tests/test_voice.py
 ```
 
+## ZThumb Local Thumbnail Engine
+
+The system includes a zero-setup local image generation engine for thumbnails:
+
+### Starting ZThumb
+
+```bash
+cd zthumb
+./run_zthumb.sh
+```
+
+Or with Docker Compose:
+```bash
+cd zthumb
+docker compose up -d
+```
+
+### ZThumb API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check with GPU/VRAM info |
+| `/models` | GET | List available models |
+| `/generate` | POST | Generate thumbnail images |
+
+### Example Usage
+
+```bash
+# Check health
+curl http://localhost:8100/health
+
+# Generate thumbnails
+curl -X POST http://localhost:8100/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "cinematic alien creature reveal", "batch": 4}'
+```
+
+### Integration with Autopilot
+
+Set `ZTHUMB_URL=http://localhost:8100` in your `.env` file to use ZThumb for thumbnail generation instead of OpenAI DALL-E.
+
 ## File Structure
 
 ```
@@ -172,6 +214,12 @@ amharic-recap-autopilot/
 │           ├── thumbnail.py
 │           ├── upload.py
 │           └── growth.py
+├── zthumb/                 # Local thumbnail engine
+│   ├── run_zthumb.sh      # One-command installer
+│   ├── docker-compose.yml
+│   ├── server/            # FastAPI server
+│   ├── backends/          # Full/Turbo/GGUF backends
+│   └── zthumb_client.py   # Python client & CLI
 ├── docs/
 │   ├── README.md
 │   ├── pipeline.mmd       # Mermaid diagram
