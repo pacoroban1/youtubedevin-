@@ -1,0 +1,25 @@
+# Z-Image Thumbnail Engine Requirements
+# Pinned versions for reproducibility
+
+# Core
+fastapi>=0.109.0
+uvicorn>=0.27.0
+pydantic>=2.0.0
+python-multipart>=0.0.9
+
+# Image generation
+diffusers==0.27.0
+transformers==4.38.0
+accelerate==0.27.0
+safetensors==0.4.2
+torch>=2.1.0
+compel==2.0.2
+
+# Image processing
+Pillow>=10.0.0
+
+# HTTP client
+httpx>=0.26.0
+
+# Optional: Memory efficiency (install if available)
+# xformers>=0.0.23
