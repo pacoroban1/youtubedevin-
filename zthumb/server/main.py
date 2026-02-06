@@ -70,6 +70,7 @@ class GenerateRequest(BaseModel):
     safe_mode: bool = Field(default=True, description="Block unsafe prompts")
     style_preset: Optional[StylePreset] = Field(default=None)
     subject: Optional[str] = Field(default=None, description="Subject for preset templates")
+    lora_scale: Optional[float] = Field(default=None, ge=0.0, le=2.0, description="Optional per-request LoRA scale override")
 
 
 class GenerateResponse(BaseModel):
@@ -91,6 +92,8 @@ class ModelsResponse(BaseModel):
     models: List[dict]
     recommended: str
     vram_mb: int
+    lora_loaded: bool = False
+    lora_path: Optional[str] = None
 
 
 # Safety blocklist
@@ -248,6 +251,17 @@ def apply_preset(request: GenerateRequest) -> GenerateRequest:
     return request
 
 
+def get_lora_status() -> dict:
+    lora_path = os.getenv("Z_LORA_PATH") or os.getenv("ZTHUMB_LORA_PATH")
+    exists = False
+    if lora_path:
+        try:
+            exists = Path(lora_path).exists()
+        except Exception:
+            exists = False
+    return {"lora_loaded": bool(lora_path and exists), "lora_path": lora_path}
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health():
     """Health check with GPU/VRAM info."""
@@ -271,11 +285,14 @@ async def list_models():
     gpu_info = get_gpu_info()
     models = get_available_models()
     recommended = select_backend(gpu_info["vram_mb"], VariantType.AUTO, models)
+    lora = get_lora_status()
     
     return ModelsResponse(
         models=models,
         recommended=recommended,
-        vram_mb=gpu_info["vram_mb"]
+        vram_mb=gpu_info["vram_mb"],
+        lora_loaded=lora["lora_loaded"],
+        lora_path=lora["lora_path"]
     )
 
 
@@ -352,7 +369,8 @@ async def generate(request: GenerateRequest, background_tasks: BackgroundTasks):
                 output_dir=output_dir,
                 output_format=request.output_format,
                 upscale=request.upscale,
-                face_detail=request.face_detail
+                face_detail=request.face_detail,
+                lora_scale=request.lora_scale
             )
             images = generated
             

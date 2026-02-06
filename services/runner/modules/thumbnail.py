@@ -14,6 +14,12 @@ import httpx
 
 
 class ThumbnailGenerator:
+    def _env_flag(self, name: str, default: bool = False) -> bool:
+        val = os.getenv(name)
+        if val is None:
+            return default
+        return val.strip().lower() in ("1", "true", "yes", "y", "on")
+
     def __init__(self, db):
         self.db = db
         self.media_dir = os.getenv("MEDIA_DIR", "/app/media")
@@ -22,6 +28,10 @@ class ThumbnailGenerator:
         
         # ZThumb local engine URL (if set, use local generation)
         self.zthumb_url = os.getenv("ZTHUMB_URL")
+
+        # Paid fallback is opt-in. If ZTHUMB_URL is set and ZThumb is unavailable,
+        # fail the job instead of silently paying for DALL·E.
+        self.allow_openai_fallback = self._env_flag("ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI", False)
         
         # Thumbnail specs
         self.width = 1280
@@ -75,6 +85,10 @@ class ThumbnailGenerator:
                     await self._generate_zthumb_thumbnail(video_title, hook, thumb_path)
                 else:
                     await self._generate_ai_thumbnail(video_title, hook, thumb_path)
+
+            # Fail fast if we didn't actually produce a thumbnail file.
+            if not os.path.exists(thumb_path):
+                raise Exception(f"Thumbnail generation failed: file not created: {thumb_path}")
             
             # Calculate heuristic score
             score = await self._calculate_heuristic_score(thumb_path)
@@ -303,7 +317,8 @@ Return ONLY 3 hooks, one per line, nothing else."""
     ) -> bool:
         """
         Generate thumbnail using ZThumb local engine.
-        Falls back to OpenAI if ZThumb is unavailable.
+        By default, does NOT fall back to OpenAI when ZTHUMB_URL is set.
+        To allow paid fallback explicitly, set ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI=true.
         """
         if not self.zthumb_url:
             return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
@@ -340,8 +355,11 @@ Return ONLY 3 hooks, one per line, nothing else."""
                 
                 images = result.get("images", [])
                 if not images:
-                    print("ZThumb returned no images, falling back to OpenAI")
-                    return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+                    msg = "ZThumb returned no images"
+                    if self.allow_openai_fallback:
+                        print(f"{msg}, falling back to OpenAI")
+                        return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+                    raise RuntimeError(msg)
                 
                 # Get the first image (best one based on ZThumb scoring)
                 best_image = images[0].replace("file://", "")
@@ -355,12 +373,17 @@ Return ONLY 3 hooks, one per line, nothing else."""
                 
                 return True
                 
-        except httpx.ConnectError:
-            print(f"ZThumb server not available at {self.zthumb_url}, falling back to OpenAI")
-            return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+        except httpx.ConnectError as e:
+            msg = f"ZThumb server not available at {self.zthumb_url}"
+            if self.allow_openai_fallback:
+                print(f"{msg}, falling back to OpenAI")
+                return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+            raise RuntimeError(msg) from e
         except Exception as e:
-            print(f"ZThumb generation error: {e}, falling back to OpenAI")
-            return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+            if self.allow_openai_fallback:
+                print(f"ZThumb generation error: {e}, falling back to OpenAI")
+                return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+            raise
     
     async def _generate_ai_thumbnail(
         self,

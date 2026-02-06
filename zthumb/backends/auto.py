@@ -77,7 +77,8 @@ class AutoBackend(BaseBackend):
         output_dir: Path,
         output_format: str,
         upscale: bool = False,
-        face_detail: bool = False
+        face_detail: bool = False,
+        lora_scale=None
     ) -> List[str]:
         """Generate images using auto-selected backend."""
         return await self.selected_backend.generate(
@@ -92,5 +93,6 @@ class AutoBackend(BaseBackend):
             output_dir=output_dir,
             output_format=output_format,
             upscale=upscale,
-            face_detail=face_detail
+            face_detail=face_detail,
+            lora_scale=lora_scale
         )

@@ -67,6 +67,8 @@ services:
       context: ./services/runner
       dockerfile: Dockerfile
     container_name: autopilot-runner
+    ports:
+      - "8000:8000"
     environment:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432

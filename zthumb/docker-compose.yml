@@ -9,12 +9,16 @@ services:
     ports:
       - "8100:8100"
     volumes:
-      - ./models:/models
-      - ./outputs:/outputs
+      - ../models:/models
+      - ../outputs:/outputs
     environment:
       - ZTHUMB_MODELS_DIR=/models
       - ZTHUMB_OUTPUTS_DIR=/outputs
       - ZTHUMB_SAFE_MODE=${ZTHUMB_SAFE_MODE:-true}
+      - Z_LORA_PATH=${Z_LORA_PATH:-}
+      - Z_LORA_SCALE=${Z_LORA_SCALE:-}
+      - ZTHUMB_LORA_PATH=${ZTHUMB_LORA_PATH:-}
+      - ZTHUMB_LORA_SCALE=${ZTHUMB_LORA_SCALE:-}
     deploy:
       resources:
         reservations:
