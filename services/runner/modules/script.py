@@ -6,20 +6,35 @@ Generates high-retention Amharic recap scripts (not literal translation).
 import os
 import json
 from typing import Dict, Any, List, Optional
+from dataclasses import dataclass
+from datetime import datetime
 import google.generativeai as genai
+
+from modules.translate import GoogleTranslateV2
 
 
 class ScriptGenerator:
     def __init__(self, db):
         self.db = db
         self.gemini_api_key = os.getenv("GEMINI_API_KEY")
-        
+
         if self.gemini_api_key:
             genai.configure(api_key=self.gemini_api_key)
             self.model = genai.GenerativeModel("gemini-1.5-pro")
+            self.model_fast = genai.GenerativeModel("gemini-1.5-flash")
         else:
             self.model = None
-    
+            self.model_fast = None
+
+        # Optional translation step. Default keeps existing behavior (Gemini rewrite in Amharic).
+        self.translation_provider = (os.getenv("TRANSLATION_PROVIDER") or "").strip().lower()
+        self.translate_client = GoogleTranslateV2()
+
+        # Optional narrator persona for the "scene reaction" vibe.
+        self.narrator_persona = (os.getenv("NARRATOR_PERSONA") or "futuristic captain").strip()
+        self.beat_seconds = int(os.getenv("SCRIPT_BEAT_SECONDS") or "20")
+        self.max_beats = int(os.getenv("SCRIPT_MAX_BEATS") or "60")
+
     async def generate_amharic_script(self, video_id: str) -> Dict[str, Any]:
         """
         Generate a high-retention Amharic recap script.
@@ -48,7 +63,7 @@ class ScriptGenerator:
         
         # Generate script components
         hook_text = await self._generate_hook(transcript, video_title)
-        main_segments = await self._generate_main_recap(transcript, timestamps)
+        main_segments = await self._generate_main_recap(transcript, timestamps, video_title=video_title)
         payoff_text = await self._generate_payoff(transcript)
         cta_text = await self._generate_cta()
         
@@ -112,12 +127,18 @@ Write ONLY the Amharic hook text, nothing else. Use Ge'ez script (ፊደል)."""
     async def _generate_main_recap(
         self,
         transcript: str,
-        timestamps: List[Dict]
+        timestamps: List[Dict],
+        video_title: str = ""
     ) -> List[Dict[str, Any]]:
         """Generate main recap segments in Amharic."""
         if not self.model:
             return self._fallback_segments()
-        
+
+        # Optional pipeline: English recap beats -> Translate -> Persona rewrite.
+        # This is useful when you want a strict translation step and then apply style/emotion separately.
+        if self.translation_provider in ("google", "gcloud", "translate") and self.translate_client.configured():
+            return await self._generate_main_recap_translate_style(transcript, timestamps, video_title=video_title)
+
         # Split transcript into chunks for processing
         chunk_size = 3000
         chunks = [transcript[i:i+chunk_size] for i in range(0, len(transcript), chunk_size)]
@@ -163,7 +184,197 @@ Write the Amharic recap segment. Include [PAUSE] markers where dramatic pauses s
                 continue
         
         return segments
-    
+
+    @dataclass
+    class _Beat:
+        start: float
+        end: float
+        text: str
+
+    def _beats_from_timestamps(self, timestamps: List[Dict[str, Any]]) -> List["_Beat"]:
+        # Timestamps can come from YouTube captions or Whisper.
+        # Expected keys: start, end(optional), text.
+        items = []
+        for t in timestamps or []:
+            try:
+                start = float(t.get("start", 0.0))
+            except Exception:
+                continue
+            end = t.get("end", None)
+            try:
+                end_f = float(end) if end is not None else None
+            except Exception:
+                end_f = None
+            text = (t.get("text") or "").strip()
+            if not text:
+                continue
+            items.append((start, end_f, text))
+        items.sort(key=lambda x: x[0])
+
+        beats: List[ScriptGenerator._Beat] = []
+        if not items:
+            return beats
+
+        cur_start = items[0][0]
+        cur_end = items[0][1] if items[0][1] is not None else cur_start
+        buf: List[str] = []
+
+        def flush():
+            nonlocal cur_start, cur_end, buf
+            merged = " ".join(buf).strip()
+            if merged:
+                beats.append(ScriptGenerator._Beat(start=cur_start, end=cur_end, text=merged))
+            buf = []
+
+        for i, (start, end, text) in enumerate(items):
+            if not buf:
+                cur_start = start
+                cur_end = end if end is not None else start
+            else:
+                # Advance end.
+                if end is not None:
+                    cur_end = max(cur_end, end)
+                else:
+                    cur_end = max(cur_end, start)
+
+            buf.append(text)
+
+            # If we don't have explicit end times, approximate using next start.
+            next_start = items[i + 1][0] if i + 1 < len(items) else None
+            approx_end = cur_end
+            if next_start is not None and (end is None):
+                approx_end = max(approx_end, next_start)
+
+            if (approx_end - cur_start) >= self.beat_seconds or len(" ".join(buf)) >= 900:
+                # Use approx_end for better windowing.
+                cur_end = approx_end
+                flush()
+
+        flush()
+        return beats[: self.max_beats]
+
+    def _beats_from_text(self, transcript: str) -> List["_Beat"]:
+        # Fallback when timestamps are missing.
+        chunk_size = 1200
+        chunks = [transcript[i : i + chunk_size] for i in range(0, len(transcript), chunk_size)]
+        beats: List[ScriptGenerator._Beat] = []
+        t = 0.0
+        for c in chunks[: self.max_beats]:
+            beats.append(ScriptGenerator._Beat(start=t, end=t + self.beat_seconds, text=c))
+            t += self.beat_seconds
+        return beats
+
+    async def _en_recap_with_emotion(self, beat_text: str, video_title: str) -> Dict[str, str]:
+        """
+        Produce a short English recap line plus emotion + reaction tag.
+        """
+        if not self.model_fast:
+            # Minimal fallback without LLM.
+            return {
+                "recap_en": beat_text[:280],
+                "emotion": "tense",
+                "reaction_en": "Stay sharp.",
+            }
+
+        prompt = f"""You are writing beat-by-beat recap notes for a YouTube movie recap.
+
+Input is a raw transcript excerpt (may be messy). Output STRICT JSON with keys:
+- recap_en: 1-2 short sentences describing what happens (English).
+- emotion: 1-3 words (e.g., fear, suspense, shock, triumph, mystery).
+- reaction_en: 1 short sentence spoken by a narrator persona reacting to the beat.
+
+Title/context: {video_title}
+
+Transcript beat:
+{beat_text[:1400]}
+"""
+        resp = self.model_fast.generate_content(prompt)
+        txt = (resp.text or "").strip()
+        # Best-effort JSON extraction.
+        try:
+            obj = json.loads(txt)
+        except Exception:
+            # Try to locate the first {...}
+            start = txt.find("{")
+            end = txt.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                obj = json.loads(txt[start : end + 1])
+            else:
+                obj = {"recap_en": txt[:400], "emotion": "tense", "reaction_en": "Stay sharp."}
+
+        recap_en = (obj.get("recap_en") or "").strip()
+        emotion = (obj.get("emotion") or "tense").strip()
+        reaction_en = (obj.get("reaction_en") or "").strip()
+        if not reaction_en:
+            reaction_en = "Stay sharp."
+        return {"recap_en": recap_en, "emotion": emotion, "reaction_en": reaction_en}
+
+    async def _stylize_amharic(self, translated_am: str, emotion: str) -> str:
+        if not self.model:
+            return translated_am
+
+        prompt = f"""You are an Amharic narrator writing a high-retention movie recap voiceover.
+
+Narrator persona: {self.narrator_persona}
+Target: Ethiopian Amharic in Ge'ez script (ፊደል).
+
+Rules:
+1) Keep meaning but rewrite for retention and clarity (not literal).
+2) Add cinematic emotion appropriate to: {emotion}
+3) Use short punchy sentences.
+4) Insert [PAUSE] markers for dramatic timing (1-2 per beat).
+5) Do not add celebrity/real-person identity details.
+
+Source (already translated to Amharic):
+{translated_am[:900]}
+
+Return ONLY the final Amharic narration for this beat.
+"""
+        resp = self.model.generate_content(prompt)
+        return (resp.text or "").strip()
+
+    async def _generate_main_recap_translate_style(
+        self,
+        transcript: str,
+        timestamps: List[Dict[str, Any]],
+        video_title: str = "",
+    ) -> List[Dict[str, Any]]:
+        beats = self._beats_from_timestamps(timestamps)
+        if not beats:
+            beats = self._beats_from_text(transcript)
+
+        segments: List[Dict[str, Any]] = []
+
+        for i, beat in enumerate(beats):
+            en = await self._en_recap_with_emotion(beat.text, video_title=video_title)
+            en_combined = f"EMOTION: {en['emotion']}. RECAP: {en['recap_en']} REACTION: {en['reaction_en']}"
+
+            tr = await self.translate_client.translate_batch([en_combined], target="am", source="en")
+            base_am = tr[0].translated_text if tr else ""
+            final_am = await self._stylize_amharic(base_am, emotion=en["emotion"])
+
+            # Estimate duration based on text length (same as old behavior).
+            word_count = len(final_am.split())
+            estimated_duration = (word_count / 110) * 60  # seconds
+
+            segments.append(
+                {
+                    "segment_number": i + 1,
+                    "start_time": beat.start,
+                    "end_time": beat.end,
+                    "emotion": en["emotion"],
+                    "recap_en": en["recap_en"],
+                    "reaction_en": en["reaction_en"],
+                    "translated_am": base_am,
+                    "text": final_am,
+                    "estimated_duration": estimated_duration,
+                    "generated_at": datetime.utcnow().isoformat(timespec="seconds"),
+                    "mode": "translate_then_style",
+                }
+            )
+
+        return segments
+
     async def _generate_payoff(self, transcript: str) -> str:
         """Generate the ending/payoff in Amharic."""
         if not self.model:

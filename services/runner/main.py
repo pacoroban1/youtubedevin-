@@ -17,6 +17,7 @@ from modules.thumbnail import ThumbnailGenerator
 from modules.upload import YouTubeUploader
 from modules.growth import GrowthLoop
 from modules.database import Database
+from modules.translate import GoogleTranslateV2
 
 app = FastAPI(
     title="Amharic Recap Autopilot",
@@ -36,6 +37,7 @@ timing = TimingMatcher(db)
 thumbnail_gen = ThumbnailGenerator(db)
 uploader = YouTubeUploader(db)
 growth = GrowthLoop(db)
+translate = GoogleTranslateV2()
 
 
 class DiscoveryRequest(BaseModel):
@@ -127,6 +129,48 @@ async def verify_voice_support():
         "verification": verification_results,
         "conclusion": "Azure TTS supports Amharic (am-ET) with neural voices. ElevenLabs does NOT support Amharic."
     }
+
+
+@app.get("/api/verify/translate")
+async def verify_translate_support():
+    """
+    TRANSLATION VERIFICATION (OPTIONAL)
+    Verifies that Google Cloud Translation API is configured and can translate
+    a short string. This is used when TRANSLATION_PROVIDER=google is enabled.
+    """
+    provider = (os.getenv("TRANSLATION_PROVIDER") or "").strip().lower()
+    if provider not in ("google", "gcloud", "translate"):
+        return {
+            "status": "skipped",
+            "provider": provider,
+            "configured": False,
+            "note": "Set TRANSLATION_PROVIDER=google and GOOGLE_CLOUD_API_KEY to enable translation verification.",
+        }
+
+    if not translate.configured():
+        return {
+            "status": "error",
+            "provider": provider,
+            "configured": False,
+            "error": "Missing GOOGLE_CLOUD_API_KEY/GOOGLE_API_KEY",
+        }
+
+    try:
+        out = await translate.translate_batch(["Hello world."], target="am", source="en")
+        sample = out[0].translated_text if out else ""
+        return {
+            "status": "success",
+            "provider": provider,
+            "configured": True,
+            "sample": {"en": "Hello world.", "am": sample},
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "provider": provider,
+            "configured": True,
+            "error": str(e),
+        }
 
 
 @app.post("/api/discover")

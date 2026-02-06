@@ -214,6 +214,30 @@ make run_zthumb
 make test_generate
 ```
 
+## Translation + Persona Recap (Optional)
+
+By default, the script module uses Gemini to generate a high-retention Amharic recap directly.
+
+If you want a more "structured" approach:
+1. Generate short English beat recaps + emotion labels
+2. Translate those beats using Google Cloud Translation API
+3. Run a final Gemini pass to apply narrator persona + cinematic emotion + `[PAUSE]` markers
+
+Enable it by setting:
+
+```bash
+export GOOGLE_CLOUD_API_KEY=...
+export TRANSLATION_PROVIDER=google
+export NARRATOR_PERSONA="futuristic captain"
+export SCRIPT_BEAT_SECONDS=20
+```
+
+Verification endpoint:
+
+```bash
+curl http://localhost:8000/api/verify/translate
+```
+
 ## File Structure
 
 ```
