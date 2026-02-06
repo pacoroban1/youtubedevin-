@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import google.generativeai as genai
 
-from modules.translate import GoogleTranslateV2
+from modules.translate import GoogleTranslateV2, LibreTranslate
 
 
 class ScriptGenerator:
@@ -28,12 +28,27 @@ class ScriptGenerator:
 
         # Optional translation step. Default keeps existing behavior (Gemini rewrite in Amharic).
         self.translation_provider = (os.getenv("TRANSLATION_PROVIDER") or "").strip().lower()
-        self.translate_client = GoogleTranslateV2()
+        self.translate_google = GoogleTranslateV2()
+        self.translate_libre = LibreTranslate()
 
         # Optional narrator persona for the "scene reaction" vibe.
         self.narrator_persona = (os.getenv("NARRATOR_PERSONA") or "futuristic captain").strip()
         self.beat_seconds = int(os.getenv("SCRIPT_BEAT_SECONDS") or "20")
         self.max_beats = int(os.getenv("SCRIPT_MAX_BEATS") or "60")
+
+    def _get_translator(self):
+        provider = self.translation_provider
+        if provider in ("", "none", "gemini"):
+            return None
+        if provider in ("google", "gcloud", "translate"):
+            if not self.translate_google.configured():
+                raise RuntimeError("TRANSLATION_PROVIDER=google but GOOGLE_CLOUD_API_KEY/GOOGLE_API_KEY is missing")
+            return self.translate_google
+        if provider in ("libretranslate", "libre", "open", "opensource", "open-source"):
+            if not self.translate_libre.configured():
+                raise RuntimeError("TRANSLATION_PROVIDER=libretranslate but LIBRETRANSLATE_URL is missing")
+            return self.translate_libre
+        raise RuntimeError(f"Unknown TRANSLATION_PROVIDER={provider!r}")
 
     async def generate_amharic_script(self, video_id: str) -> Dict[str, Any]:
         """
@@ -136,8 +151,14 @@ Write ONLY the Amharic hook text, nothing else. Use Ge'ez script (ፊደል)."""
 
         # Optional pipeline: English recap beats -> Translate -> Persona rewrite.
         # This is useful when you want a strict translation step and then apply style/emotion separately.
-        if self.translation_provider in ("google", "gcloud", "translate") and self.translate_client.configured():
-            return await self._generate_main_recap_translate_style(transcript, timestamps, video_title=video_title)
+        translator = self._get_translator()
+        if translator is not None:
+            return await self._generate_main_recap_translate_style(
+                transcript,
+                timestamps,
+                video_title=video_title,
+                translator=translator,
+            )
 
         # Split transcript into chunks for processing
         chunk_size = 3000
@@ -338,7 +359,11 @@ Return ONLY the final Amharic narration for this beat.
         transcript: str,
         timestamps: List[Dict[str, Any]],
         video_title: str = "",
+        translator=None,
     ) -> List[Dict[str, Any]]:
+        if translator is None:
+            raise RuntimeError("internal: translator is required")
+
         beats = self._beats_from_timestamps(timestamps)
         if not beats:
             beats = self._beats_from_text(transcript)
@@ -349,7 +374,7 @@ Return ONLY the final Amharic narration for this beat.
             en = await self._en_recap_with_emotion(beat.text, video_title=video_title)
             en_combined = f"EMOTION: {en['emotion']}. RECAP: {en['recap_en']} REACTION: {en['reaction_en']}"
 
-            tr = await self.translate_client.translate_batch([en_combined], target="am", source="en")
+            tr = await translator.translate_batch([en_combined], target="am", source="en")
             base_am = tr[0].translated_text if tr else ""
             final_am = await self._stylize_amharic(base_am, emotion=en["emotion"])
 

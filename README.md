@@ -41,7 +41,10 @@ cp .env.example .env
 make up
 ```
 
-4. Access the n8n dashboard at http://localhost:5678
+4. Access:
+   - n8n dashboard: http://localhost:5678
+   - runner API: http://localhost:8000
+   - UI dashboard: http://localhost:8000/ui
 
 ### Environment Variables
 
@@ -220,7 +223,7 @@ By default, the script module uses Gemini to generate a high-retention Amharic r
 
 If you want a more "structured" approach:
 1. Generate short English beat recaps + emotion labels
-2. Translate those beats using Google Cloud Translation API
+2. Translate those beats using Google Cloud Translation API (paid) or LibreTranslate (open-source)
 3. Run a final Gemini pass to apply narrator persona + cinematic emotion + `[PAUSE]` markers
 
 Enable it by setting:
@@ -228,6 +231,15 @@ Enable it by setting:
 ```bash
 export GOOGLE_CLOUD_API_KEY=...
 export TRANSLATION_PROVIDER=google
+export NARRATOR_PERSONA="futuristic captain"
+export SCRIPT_BEAT_SECONDS=20
+```
+
+Or with LibreTranslate:
+
+```bash
+export LIBRETRANSLATE_URL=http://localhost:5000
+export TRANSLATION_PROVIDER=libretranslate
 export NARRATOR_PERSONA="futuristic captain"
 export SCRIPT_BEAT_SECONDS=20
 ```
