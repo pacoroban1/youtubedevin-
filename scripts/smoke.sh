@@ -11,6 +11,11 @@ if [ -f .env ]; then
   set +a
 fi
 
+if ! command -v docker >/dev/null 2>&1; then
+  echo "ERROR: docker CLI not found (install Docker Engine or Docker Desktop)." >&2
+  exit 1
+fi
+
 if command -v docker-compose >/dev/null 2>&1; then
   COMPOSE_CMD=(docker-compose)
 elif docker compose version >/dev/null 2>&1; then

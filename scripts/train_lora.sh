@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+if ! command -v docker >/dev/null 2>&1; then
+  echo "ERROR: docker CLI not found (install Docker Engine or Docker Desktop)." >&2
+  exit 1
+fi
+
 if ! docker info >/dev/null 2>&1; then
   echo "ERROR: Docker daemon is not running." >&2
   exit 1
@@ -71,4 +76,3 @@ echo "OK: LoRA output at $OUTPUT"
 echo "Set for ZThumb:"
 echo "  export Z_LORA_PATH=/outputs/lora/$(basename "$OUTPUT")"
 echo "  export Z_LORA_SCALE=0.8"
-

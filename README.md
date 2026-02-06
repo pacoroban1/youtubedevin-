@@ -192,6 +192,7 @@ curl -X POST http://localhost:8100/generate \
 ### Integration with Autopilot
 
 Set `ZTHUMB_URL=http://localhost:8100` in your `.env` file to use ZThumb for thumbnail generation instead of OpenAI DALL-E.
+If you're running the runner via Docker (default), `localhost` inside the container is not your host. The runner will automatically retry common host aliases when it detects a localhost `ZTHUMB_URL`.
 By default, if `ZTHUMB_URL` is set and ZThumb is down, thumbnail generation fails (so you can retry) instead of silently paying for DALL·E.
 To opt into the paid fallback explicitly, set `ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI=true`.
 

@@ -89,23 +89,28 @@ class BaseBackend(ABC):
                 raise RuntimeError("Pipeline does not support LoRA (missing load_lora_weights)")
 
             loaded_path = getattr(pipe, "_zthumb_lora_loaded_path", None)
+            adapter_name = getattr(pipe, "_zthumb_lora_adapter_name", "zthumb")
             if loaded_path != lora_path:
                 # adapter_name support exists on newer diffusers; best-effort.
+                adapter_name = "zthumb"
                 try:
-                    pipe.load_lora_weights(lora_path, adapter_name="zthumb")
+                    pipe.load_lora_weights(lora_path, adapter_name=adapter_name)
                 except TypeError:
+                    # Older diffusers uses an implicit "default" adapter name.
+                    adapter_name = "default"
                     pipe.load_lora_weights(lora_path)
                 setattr(pipe, "_zthumb_lora_loaded_path", lora_path)
+                setattr(pipe, "_zthumb_lora_adapter_name", adapter_name)
 
             # If adapters can be set, prefer that for per-request scaling.
             if hasattr(pipe, "set_adapters"):
                 try:
-                    pipe.set_adapters(["zthumb"], adapter_weights=[scale])
-                except TypeError:
-                    # Some versions use a different signature.
+                    pipe.set_adapters([adapter_name], adapter_weights=[scale])
+                    # When adapter weights can be set, avoid fusing so lora_scale overrides work.
+                    return True
+                except Exception:
+                    # If adapter selection fails, fall back to fusing below.
                     pass
-                # When adapter weights can be set, avoid fusing so lora_scale overrides work.
-                return True
 
             # Fallback path: fuse LoRA if the pipeline doesn't support adapters.
             if hasattr(pipe, "fuse_lora"):

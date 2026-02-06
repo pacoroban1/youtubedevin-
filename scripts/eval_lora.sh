@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+if ! command -v docker >/dev/null 2>&1; then
+  echo "ERROR: docker CLI not found (install Docker Engine or Docker Desktop)." >&2
+  exit 1
+fi
+
 if ! docker info >/dev/null 2>&1; then
   echo "ERROR: Docker daemon is not running." >&2
   exit 1
@@ -46,4 +51,3 @@ docker run --rm \
   -w /repo \
   "$IMG_TAG" \
   "${CMD[@]}"
-

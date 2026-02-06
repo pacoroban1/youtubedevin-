@@ -90,6 +90,8 @@ services:
     volumes:
       - ./services/runner:/app
       - ./scripts:/app/scripts
+      # Needed when ZThumb returns file:// paths under /outputs so the runner can read/copy them.
+      - ./outputs:/outputs
       - autopilot_media:/app/media
     depends_on:
       postgres:
