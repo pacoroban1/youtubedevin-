@@ -102,9 +102,14 @@ class VoiceGenerator:
         final_audio = os.path.join(audio_dir, "narration.wav")
         await self._concatenate_audio(segment_files, final_audio)
         
+        # Apply "Fantastic Captain" post-processing
+        # Deep, confident, cinematic narrator; warm low-end; crisp consonants
+        processed_audio = os.path.join(audio_dir, "narration_processed.wav")
+        await self._apply_fantastic_captain_processing(final_audio, processed_audio)
+        
         # Normalize audio
         normalized_audio = os.path.join(audio_dir, "narration_normalized.wav")
-        loudness = await self._normalize_audio(final_audio, normalized_audio)
+        loudness = await self._normalize_audio(processed_audio, normalized_audio)
         
         # Quality check
         quality_passed = await self._quality_check(normalized_audio)
@@ -405,3 +410,57 @@ class VoiceGenerator:
         except Exception as e:
             print(f"Duration check error: {e}")
             return 0.0
+    
+    async def _apply_fantastic_captain_processing(self, input_file: str, output_file: str) -> bool:
+        """
+        Apply "Fantastic Captain" voice processing for deep, cinematic narrator vibe.
+        
+        Processing chain:
+        1. High-pass filter at 80Hz to remove rumble
+        2. Low shelf boost at 200Hz for warmth (+3dB)
+        3. Presence boost at 3kHz for crisp consonants (+2dB)
+        4. Compression for controlled, confident delivery
+        5. De-essing to reduce sibilance
+        6. Subtle saturation for warmth
+        """
+        try:
+            # Complex filter chain for "Fantastic Captain" voice
+            # - highpass: remove low rumble
+            # - lowshelf: add warmth to low-end
+            # - equalizer: presence boost for clarity
+            # - compand: compression for controlled delivery
+            # - acompressor: additional dynamic control
+            filter_chain = (
+                "highpass=f=80,"  # Remove rumble below 80Hz
+                "lowshelf=g=3:f=200:t=s,"  # Warm low-end boost
+                "equalizer=f=3000:t=q:w=1:g=2,"  # Presence/clarity boost
+                "equalizer=f=6000:t=q:w=1:g=-1,"  # Slight de-essing
+                "acompressor=threshold=-20dB:ratio=3:attack=5:release=50:makeup=2,"  # Compression
+                "afftdn=nf=-25"  # Noise reduction
+            )
+            
+            cmd = [
+                "ffmpeg",
+                "-i", input_file,
+                "-af", filter_chain,
+                "-ar", "24000",
+                "-ac", "1",
+                "-y",
+                output_file
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, timeout=300)
+            
+            if result.returncode != 0:
+                print(f"Fantastic Captain processing failed: {result.stderr}")
+                # Fall back to simple copy
+                import shutil
+                shutil.copy(input_file, output_file)
+            
+            return result.returncode == 0
+            
+        except Exception as e:
+            print(f"Fantastic Captain processing error: {e}")
+            import shutil
+            shutil.copy(input_file, output_file)
+            return False
