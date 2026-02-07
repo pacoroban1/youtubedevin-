@@ -2,8 +2,8 @@
 
 :root {
   /* Palette tuned to a graphite / near-black UI with minimal color. */
-  --bg0: #020203;
-  --bg1: #070708;
+  --bg0: #000000;
+  --bg1: #000000;
   --fg: rgba(245, 245, 247, 0.95);
   --muted: rgba(245, 245, 247, 0.64);
   --muted2: rgba(245, 245, 247, 0.42);
@@ -33,9 +33,7 @@ body {
   margin: 0;
   color: var(--fg);
   font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
-  background: radial-gradient(1100px 700px at 50% -12%, rgba(255, 255, 255, 0.04), transparent 62%),
-              radial-gradient(900px 600px at 8% 110%, rgba(255, 255, 255, 0.03), transparent 55%),
-              linear-gradient(180deg, var(--bg0), var(--bg1));
+  background: #000;
 }
 
 .bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; }
@@ -45,7 +43,7 @@ body {
     linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
   background-size: 56px 56px;
-  opacity: 0.10;
+  opacity: 0.06;
   mask-image: radial-gradient(circle at 12% 10%, rgba(0,0,0,0.95), rgba(0,0,0,0.25) 60%, transparent 78%);
 }
 .bg__fabric {
@@ -54,15 +52,15 @@ body {
   background-image:
     repeating-linear-gradient(45deg, rgba(255,255,255,0.055) 0px, rgba(255,255,255,0.055) 1px, transparent 1px, transparent 7px),
     repeating-linear-gradient(-45deg, rgba(255,255,255,0.045) 0px, rgba(255,255,255,0.045) 1px, transparent 1px, transparent 9px);
-  opacity: 0.065;
+  opacity: 0.05;
   mix-blend-mode: overlay;
   filter: blur(0.3px);
   transform: translateZ(0);
   pointer-events: none;
 }
-.bg__glow { position: absolute; width: 820px; height: 820px; border-radius: 999px; filter: blur(120px); opacity: 0.26; }
-.bg__glow--a { left: -260px; top: -300px; background: radial-gradient(circle at 40% 40%, rgba(248,113,113,0.14), rgba(255,255,255,0)); }
-.bg__glow--b { right: -280px; bottom: -320px; background: radial-gradient(circle at 40% 40%, rgba(255,255,255,0.08), rgba(255,255,255,0)); }
+.bg__glow { position: absolute; width: 880px; height: 880px; border-radius: 999px; filter: blur(140px); opacity: 0.20; }
+.bg__glow--a { left: -300px; top: -360px; background: radial-gradient(circle at 40% 40%, rgba(248,113,113,0.20), rgba(0,0,0,0)); }
+.bg__glow--b { right: -340px; bottom: -380px; background: radial-gradient(circle at 40% 40%, rgba(255,255,255,0.06), rgba(0,0,0,0)); }
 .bg__noise {
   position: absolute; inset: -30%;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.25'/%3E%3C/svg%3E");
@@ -81,7 +79,7 @@ body {
   position: absolute;
   inset: -20% 0 -20% 0;
   background: linear-gradient(180deg, transparent 0%, rgba(245,245,247,0.10) 45%, transparent 55%, transparent 100%);
-  opacity: 0.03;
+  opacity: 0.02;
   transform: translate3d(0, -15%, 0);
   animation: scan 10.5s linear infinite;
   pointer-events: none;
@@ -100,7 +98,7 @@ body {
   position: sticky;
   top: 0;
   backdrop-filter: blur(14px);
-  background: rgba(0, 0, 0, 0.62);
+  background: rgba(0, 0, 0, 0.72);
   border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 .topbar__left { display: flex; align-items: center; gap: 14px; }
