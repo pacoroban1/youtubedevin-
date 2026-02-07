@@ -9,6 +9,7 @@ const els = {
   jsonOut: $("jsonOut"),
   logOut: $("logOut"),
   videoId: $("videoId"),
+  engineNotes: $("engineNotes"),
 
   btnRefresh: $("btnRefresh"),
   btnCopy: $("btnCopy"),
@@ -45,9 +46,21 @@ const els = {
 
   artifactMeta: $("artifactMeta"),
   thumbGrid: $("thumbGrid"),
+  thumbHero: $("thumbHero"),
+  thumbHeroImg: $("thumbHeroImg"),
+  thumbHeroMeta: $("thumbHeroMeta"),
   audioEl: $("audioEl"),
   audioLink: $("audioLink"),
   audioMeta: $("audioMeta"),
+
+  scriptHook: $("scriptHook"),
+  scriptMeta: $("scriptMeta"),
+  btnCopyHook: $("btnCopyHook"),
+
+  cmdk: $("cmdk"),
+  cmdkBackdrop: $("cmdkBackdrop"),
+  cmdkInput: $("cmdkInput"),
+  cmdkList: $("cmdkList"),
 };
 
 const btns = [
@@ -84,6 +97,8 @@ const PIPELINE_STEPS = [
 let currentJobId = null;
 let currentJobStatus = null;
 let jobPollInFlight = false;
+let selectedThumbUrl = null;
+let lastHookText = "";
 
 function ts() {
   const d = new Date();
@@ -100,11 +115,11 @@ function log(tag, msg) {
 function setStatus(kind, text) {
   els.statusText.textContent = text;
   const led = els.statusLed;
-  let bg = "rgba(20,19,26,0.20)";
-  if (kind === "working") bg = "rgba(14,165,164,0.95)";
-  if (kind === "ok") bg = "rgba(18,185,129,0.95)";
-  if (kind === "warn") bg = "rgba(249,115,22,0.95)";
-  if (kind === "err") bg = "rgba(239,68,68,0.95)";
+  let bg = "rgba(246,246,249,0.20)";
+  if (kind === "working") bg = "rgba(34,211,238,0.95)";
+  if (kind === "ok") bg = "rgba(163,255,18,0.95)";
+  if (kind === "warn") bg = "rgba(251,191,36,0.95)";
+  if (kind === "err") bg = "rgba(251,113,133,0.95)";
   led.style.background = bg;
 }
 
@@ -135,35 +150,102 @@ function normalizeMediaUrl(pathOrUrl) {
 }
 
 function clearArtifacts() {
+  selectedThumbUrl = null;
+  lastHookText = "";
   if (els.thumbGrid) els.thumbGrid.innerHTML = `<div class="thumbs__empty">Generate thumbnails to see previews here.</div>`;
+  if (els.thumbHero) els.thumbHero.hidden = true;
+  if (els.thumbHeroImg) els.thumbHeroImg.removeAttribute("src");
+  if (els.thumbHeroMeta) els.thumbHeroMeta.textContent = "";
   if (els.audioEl) els.audioEl.removeAttribute("src");
   if (els.audioLink) {
     els.audioLink.hidden = true;
     els.audioLink.href = "#";
   }
   if (els.audioMeta) els.audioMeta.textContent = "Generate voice to preview audio.";
+  if (els.scriptHook) els.scriptHook.textContent = "Generate script to preview the hook here.";
+  if (els.scriptMeta) els.scriptMeta.textContent = "Waiting…";
   if (els.artifactMeta) els.artifactMeta.textContent = "Waiting for output…";
+}
+
+function setSelectedThumb(url, metaText) {
+  selectedThumbUrl = url || null;
+  if (!els.thumbHero || !els.thumbHeroImg || !els.thumbHeroMeta) return;
+  if (!url) {
+    els.thumbHero.hidden = true;
+    els.thumbHeroImg.removeAttribute("src");
+    els.thumbHeroMeta.textContent = "";
+    return;
+  }
+  els.thumbHero.hidden = false;
+  els.thumbHeroImg.src = url;
+  els.thumbHeroMeta.textContent = metaText || "Selected thumbnail";
 }
 
 function renderArtifacts(payload) {
   if (!payload || typeof payload !== "object") return;
 
+  // Script preview (hook)
+  const hook = firstDefined(payload.hook_text, payload.hook, payload.script_preview);
+  if (hook && els.scriptHook) {
+    lastHookText = String(hook);
+    els.scriptHook.textContent = lastHookText;
+  }
+  if (els.scriptMeta) {
+    const beats = Array.isArray(payload.beats) ? payload.beats.length : payload.segments_count;
+    const qs = payload.quality_score ? `q=${Number(payload.quality_score).toFixed(2)}` : "";
+    const parts = [];
+    if (beats !== undefined) parts.push(`beats=${beats}`);
+    if (qs) parts.push(qs);
+    if (payload.persona) parts.push(String(payload.persona));
+    els.scriptMeta.textContent = parts.length ? parts.join(" • ") : (els.scriptMeta.textContent || "Waiting…");
+  }
+
+  // Thumbnails grid + hero
   const images = payload.images || payload.thumbnails;
-  if (els.thumbGrid) {
-    if (Array.isArray(images) && images.length) {
-      els.thumbGrid.innerHTML = "";
-      for (const img of images) {
-        const url = firstDefined(img?.url, normalizeMediaUrl(img?.path));
-        if (!url) continue;
-        const a = document.createElement("a");
-        a.className = "thumb";
-        a.href = url;
-        a.target = "_blank";
-        a.rel = "noreferrer";
-        a.innerHTML = `<img alt="thumbnail" src="${escapeHtml(url)}" loading="lazy" />`;
-        els.thumbGrid.appendChild(a);
+  if (Array.isArray(images) && images.length && els.thumbGrid) {
+    els.thumbGrid.innerHTML = "";
+
+    const bestIdx = Number.isFinite(Number(payload.best_pick_index)) ? Number(payload.best_pick_index) : null;
+    let firstUrl = null;
+    let firstMeta = null;
+
+    images.forEach((img, idx) => {
+      const url = firstDefined(img?.url, normalizeMediaUrl(img?.path));
+      if (!url) return;
+      const score = img?.score;
+      const badge = idx === bestIdx ? "best" : `#${idx + 1}`;
+      const meta = `#${idx + 1}${typeof score === "number" ? ` • score=${score.toFixed(2)}` : ""}`;
+
+      if (!firstUrl) {
+        firstUrl = url;
+        firstMeta = meta;
       }
-    }
+
+      const a = document.createElement("a");
+      a.className = `thumb${selectedThumbUrl === url ? " thumb--selected" : ""}`;
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noreferrer";
+      a.innerHTML = `
+        <span class="thumb__badge">${escapeHtml(badge)}</span>
+        <img alt="thumbnail" src="${escapeHtml(url)}" loading="lazy" />
+      `;
+      a.addEventListener("click", (ev) => {
+        // Default click selects; Cmd/Ctrl-click opens.
+        if (!ev.metaKey && !ev.ctrlKey) {
+          ev.preventDefault();
+          setSelectedThumb(url, meta);
+          // Update selection styling without re-rendering.
+          for (const el of els.thumbGrid.querySelectorAll(".thumb")) el.classList.remove("thumb--selected");
+          a.classList.add("thumb--selected");
+        }
+      });
+      els.thumbGrid.appendChild(a);
+    });
+
+    // Ensure hero shows something.
+    if (!selectedThumbUrl && firstUrl) setSelectedThumb(firstUrl, firstMeta);
+    if (selectedThumbUrl && els.thumbHero && els.thumbHero.hidden) setSelectedThumb(selectedThumbUrl, firstMeta);
   }
 
   const audioUrl = firstDefined(payload.audio_url, normalizeMediaUrl(payload.audio_path), normalizeMediaUrl(payload.audio_file));
@@ -186,6 +268,108 @@ function renderArtifacts(payload) {
     const model = payload.model_used ? ` • ${payload.model_used}` : "";
     const st = payload.status ? ` • ${payload.status}` : "";
     els.artifactMeta.textContent = `${vid}${st}${model}`;
+  }
+}
+
+// --- Command palette (Cmd+K / Ctrl+K) ---
+
+let cmdkOpen = false;
+let cmdkIndex = 0;
+let cmdkFiltered = [];
+let cmdkRestoreFocus = null;
+
+function allCommands() {
+  return [
+    { name: "Discover", desc: "Find trending recap channels + videos", key: "D", run: () => run("discover", () => api("POST", "/api/discover", {})) },
+    { name: "Ingest", desc: "Download + extract captions/transcript (YouTube ID)", key: "I", run: () => run("ingest", () => api("POST", `/api/ingest/${encodeURIComponent(getVideoIdRequired())}`)) },
+    { name: "Script (Preview)", desc: "Generate hook + quick preview", key: "S", run: () => run("script", () => api("POST", `/api/script/${encodeURIComponent(getVideoIdRequired())}`)) },
+    { name: "Script (Full)", desc: "Generate full structured recap script", key: "F", run: () => run("script_full", () => api("POST", `/api/script/full/${encodeURIComponent(getVideoIdRequired())}`)) },
+    { name: "Voice (TTS)", desc: "Generate narration audio", key: "V", run: () => run("voice", () => api("POST", `/api/voice/${encodeURIComponent(getVideoIdRequired())}`)) },
+    { name: "Thumbnail", desc: "Generate 4 thumbnails (Imagen/Gemini)", key: "T", run: () => run("thumbnail", () => api("POST", `/api/thumbnail/${encodeURIComponent(getVideoIdRequired())}`)) },
+    { name: "Full Pipeline", desc: "Run the async job pipeline (best effort)", key: "P", run: () => els.btnFull?.click() },
+    { name: "Refresh", desc: "Refresh config + jobs", key: "R", run: () => refresh() },
+  ];
+}
+
+function filterCommands(q) {
+  const query = String(q || "").trim().toLowerCase();
+  const cmds = allCommands();
+  if (!query) return cmds;
+  return cmds.filter((c) => (c.name + " " + c.desc).toLowerCase().includes(query));
+}
+
+function renderCmdkList() {
+  if (!els.cmdkList) return;
+  els.cmdkList.innerHTML = "";
+
+  if (!cmdkFiltered.length) {
+    const empty = document.createElement("div");
+    empty.className = "jobs__empty";
+    empty.textContent = "No matches.";
+    els.cmdkList.appendChild(empty);
+    return;
+  }
+
+  cmdkFiltered.forEach((c, i) => {
+    const item = document.createElement("div");
+    item.className = `cmdk__item${i === cmdkIndex ? " cmdk__item--active" : ""}`;
+    item.tabIndex = 0;
+    item.innerHTML = `
+      <div>
+        <div class="cmdk__name">${escapeHtml(c.name)}</div>
+        <div class="cmdk__desc">${escapeHtml(c.desc)}</div>
+      </div>
+      <div class="cmdk__right"><span class="cmdk__key">${escapeHtml(c.key)}</span></div>
+    `;
+    item.addEventListener("mouseenter", () => {
+      cmdkIndex = i;
+      renderCmdkList();
+    });
+    item.addEventListener("click", () => execCmdk(i));
+    els.cmdkList.appendChild(item);
+  });
+
+  // Keep the active item in view while navigating.
+  const active = els.cmdkList.querySelector(".cmdk__item--active");
+  if (active && typeof active.scrollIntoView === "function") {
+    active.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function openCmdk() {
+  if (!els.cmdk) return;
+  cmdkRestoreFocus = document.activeElement;
+  cmdkOpen = true;
+  cmdkIndex = 0;
+  cmdkFiltered = filterCommands("");
+  els.cmdk.hidden = false;
+  document.body.style.overflow = "hidden";
+  if (els.cmdkInput) {
+    els.cmdkInput.value = "";
+    els.cmdkInput.focus();
+  }
+  renderCmdkList();
+}
+
+function closeCmdk() {
+  if (!els.cmdk) return;
+  cmdkOpen = false;
+  els.cmdk.hidden = true;
+  document.body.style.overflow = "";
+  const el = cmdkRestoreFocus;
+  cmdkRestoreFocus = null;
+  if (el && typeof el.focus === "function") el.focus();
+}
+
+function execCmdk(i) {
+  const c = cmdkFiltered[i];
+  if (!c) return;
+  closeCmdk();
+  try {
+    const p = c.run();
+    if (p && typeof p.then === "function") p.catch(() => {});
+  } catch (e) {
+    log("cmdk", String(e));
   }
 }
 
@@ -221,8 +405,44 @@ async function api(method, path, body) {
   return data;
 }
 
+function extractVideoId(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+
+  // Common copy/paste formats:
+  // - youtu.be/<id>
+  // - youtube.com/watch?v=<id>
+  // - plain <id>
+  try {
+    if (s.includes("youtu.be/") || s.includes("youtube.com/")) {
+      const u = new URL(s);
+      if (u.hostname.includes("youtu.be")) {
+        const id = u.pathname.split("/").filter(Boolean)[0];
+        return id || s;
+      }
+      const v = u.searchParams.get("v");
+      if (v) return v;
+    }
+  } catch {
+    // ignore URL parse errors
+  }
+
+  const m = s.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
+  if (m) return m[1];
+
+  return s;
+}
+
+function normalizeVideoIdField() {
+  if (!els.videoId) return "";
+  const before = String(els.videoId.value || "");
+  const id = extractVideoId(before);
+  if (id && before.trim() !== id) els.videoId.value = id;
+  return id;
+}
+
 function getVideoIdRequired() {
-  const v = (els.videoId.value || "").trim();
+  const v = extractVideoId(els.videoId.value || "");
   if (!v) throw new Error("Missing video ID");
   return v;
 }
@@ -495,6 +715,11 @@ async function refresh() {
   await run("refresh", async () => {
     const health = await api("GET", "/health");
     const cfg = await api("GET", "/api/config");
+    if (els.engineNotes) {
+      const persona = cfg?.narrator_persona ? escapeHtml(cfg.narrator_persona) : "futuristic captain";
+      const g = cfg?.gemini_configured ? "ready" : "missing GEMINI_API_KEY";
+      els.engineNotes.innerHTML = `Engines: <span class="kbd">Gemini</span> ${g}. <span class="kbd">ZThumb</span> disabled. Persona: <span class="kbd">${persona}</span>`;
+    }
     const jobs = await refreshJobs();
     return { health, config: cfg, jobs: { count: jobs.length } };
   });
@@ -505,7 +730,12 @@ function wire() {
   els.btnRefresh?.addEventListener("click", refresh);
   els.btnJobsRefresh?.addEventListener("click", () => refreshJobs().catch(() => {}));
 
+  // Normalize YouTube URLs pasted into the input field.
+  els.videoId?.addEventListener("blur", () => normalizeVideoIdField());
+  els.videoId?.addEventListener("paste", () => setTimeout(() => normalizeVideoIdField(), 0));
+
   els.btnClear?.addEventListener("click", () => {
+    clearArtifacts();
     els.jsonOut.textContent = "{}";
     setStatus("idle", "Idle");
     log("ui", "cleared output");
@@ -524,6 +754,68 @@ function wire() {
       log("ui", "clipboard copy failed (browser permissions)");
       setStatus("warn", "Copy failed");
       setTimeout(() => setStatus("idle", "Idle"), 900);
+    }
+  });
+
+  els.btnCopyHook?.addEventListener("click", async () => {
+    const txt = String(lastHookText || "").trim();
+    if (!txt) {
+      log("ui", "no hook to copy yet");
+      setStatus("warn", "No hook");
+      setTimeout(() => setStatus("idle", "Idle"), 900);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(txt);
+      log("ui", "copied hook");
+      setStatus("ok", "Hook copied");
+      setTimeout(() => setStatus("idle", "Idle"), 700);
+    } catch {
+      log("ui", "clipboard copy failed (browser permissions)");
+      setStatus("warn", "Copy failed");
+      setTimeout(() => setStatus("idle", "Idle"), 900);
+    }
+  });
+
+  // Command palette wiring.
+  els.cmdkBackdrop?.addEventListener("click", closeCmdk);
+  els.cmdkInput?.addEventListener("input", () => {
+    cmdkFiltered = filterCommands(els.cmdkInput.value || "");
+    cmdkIndex = 0;
+    renderCmdkList();
+  });
+  document.addEventListener("keydown", (ev) => {
+    const k = String(ev.key || "").toLowerCase();
+    if ((ev.ctrlKey || ev.metaKey) && k === "k") {
+      ev.preventDefault();
+      (cmdkOpen ? closeCmdk : openCmdk)();
+      return;
+    }
+
+    if (!cmdkOpen) return;
+
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      closeCmdk();
+      return;
+    }
+    if (!cmdkFiltered.length) return;
+    if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      cmdkIndex = Math.min(cmdkFiltered.length - 1, cmdkIndex + 1);
+      renderCmdkList();
+      return;
+    }
+    if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      cmdkIndex = Math.max(0, cmdkIndex - 1);
+      renderCmdkList();
+      return;
+    }
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      execCmdk(cmdkIndex);
+      return;
     }
   });
 
@@ -562,7 +854,7 @@ function wire() {
       await selectJob(active.id, { pollIfRunning: true });
       return;
     }
-    const v = (els.videoId.value || "").trim();
+    const v = normalizeVideoIdField();
     const body = v ? { video_id: v, auto_select: false } : { auto_select: true };
 
     setPipelineRunning(true);

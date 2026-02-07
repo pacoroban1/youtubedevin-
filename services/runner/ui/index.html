@@ -13,6 +13,7 @@
       <div class="bg__glow bg__glow--a"></div>
       <div class="bg__glow bg__glow--b"></div>
       <div class="bg__noise" aria-hidden="true"></div>
+      <div class="bg__scan" aria-hidden="true"></div>
     </div>
 
     <header class="topbar">
@@ -23,7 +24,7 @@
         </div>
         <div>
           <div class="h1">Autopilot Studio</div>
-          <div class="sub">Gemini-only script, thumbnails, and voice. No ZThumb. No OpenAI.</div>
+          <div class="sub">Command your recap pipeline like a control room. <span class="kbd">Cmd</span>/<span class="kbd">Ctrl</span>+<span class="kbd">K</span> for Command Palette.</div>
         </div>
       </div>
 
@@ -123,17 +124,34 @@
           <div class="artifact__grid">
             <div class="artifact artifact--wide">
               <div class="artifact__label">Thumbnails</div>
+              <div class="thumbhero" id="thumbHero" hidden>
+                <img class="thumbhero__img" id="thumbHeroImg" alt="selected thumbnail" />
+                <div class="thumbhero__meta" id="thumbHeroMeta"></div>
+              </div>
               <div class="thumbs" id="thumbGrid">
                 <div class="thumbs__empty">Generate thumbnails to see previews here.</div>
               </div>
             </div>
 
-            <div class="artifact">
-              <div class="artifact__label">Voice</div>
-              <div class="audio">
-                <audio id="audioEl" controls preload="none"></audio>
-                <a class="link" id="audioLink" href="#" target="_blank" rel="noreferrer" hidden>Open audio</a>
-                <div class="mini" id="audioMeta">Generate voice to preview audio.</div>
+            <div class="artifactcol">
+              <div class="artifact">
+                <div class="artifact__label">Voice</div>
+                <div class="audio">
+                  <audio id="audioEl" controls preload="none"></audio>
+                  <a class="link" id="audioLink" href="#" target="_blank" rel="noreferrer" hidden>Open audio</a>
+                  <div class="mini" id="audioMeta">Generate voice to preview audio.</div>
+                </div>
+              </div>
+
+              <div class="artifact">
+                <div class="artifact__label">Script</div>
+                <div class="scriptbox">
+                  <div class="scriptbox__hook" id="scriptHook">Generate script to preview the hook here.</div>
+                  <div class="scriptbox__row">
+                    <button class="btn btn--ghost btn--mini" id="btnCopyHook" type="button">Copy Hook</button>
+                    <div class="mini" id="scriptMeta">Waiting…</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -211,5 +229,18 @@
         <span class="muted">UI served by runner • /ui</span>
       </div>
     </footer>
+
+    <!-- Command palette -->
+    <div class="cmdk" id="cmdk" hidden>
+      <div class="cmdk__backdrop" id="cmdkBackdrop"></div>
+      <div class="cmdk__panel" role="dialog" aria-modal="true" aria-label="Command Palette">
+        <div class="cmdk__hd">
+          <div class="cmdk__title">Command Palette</div>
+          <div class="cmdk__hint">Type to filter. <span class="kbd">Esc</span> to close.</div>
+        </div>
+        <input class="cmdk__input" id="cmdkInput" placeholder="Search commands…" autocomplete="off" />
+        <div class="cmdk__list" id="cmdkList"></div>
+      </div>
+    </div>
   </body>
 </html>
