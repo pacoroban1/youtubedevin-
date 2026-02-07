@@ -59,7 +59,7 @@ body {
   pointer-events: none;
 }
 .bg__glow { position: absolute; width: 880px; height: 880px; border-radius: 999px; filter: blur(140px); opacity: 0.20; }
-.bg__glow--a { left: -300px; top: -360px; background: radial-gradient(circle at 40% 40%, rgba(248,113,113,0.20), rgba(0,0,0,0)); }
+.bg__glow--a { left: -300px; top: -360px; background: radial-gradient(circle at 40% 40%, rgba(255,255,255,0.08), rgba(0,0,0,0)); }
 .bg__glow--b { right: -340px; bottom: -380px; background: radial-gradient(circle at 40% 40%, rgba(255,255,255,0.06), rgba(0,0,0,0)); }
 .bg__noise {
   position: absolute; inset: -30%;
@@ -164,7 +164,6 @@ body {
   border: 1px solid rgba(255,255,255,0.08);
   box-shadow: var(--shadow),
               0 0 0 1px var(--edge_red),
-              0 0 40px rgba(248,113,113,0.05),
               inset 0 1px 0 rgba(255,255,255,0.07);
   backdrop-filter: blur(18px) saturate(120%);
   -webkit-backdrop-filter: blur(18px) saturate(120%);
@@ -178,7 +177,6 @@ body {
   pointer-events: none;
   background:
     radial-gradient(120% 70% at 0% 0%, rgba(255,255,255,0.09), transparent 55%),
-    radial-gradient(100% 70% at 100% 0%, rgba(248,113,113,0.10), transparent 58%),
     radial-gradient(120% 90% at 50% 120%, rgba(0,0,0,0.20), transparent 60%);
   opacity: 0.85;
 }
@@ -301,8 +299,7 @@ body {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.07), transparent 55%),
-    radial-gradient(110% 80% at 100% 0%, rgba(248,113,113,0.07), transparent 60%);
+    radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.07), transparent 55%);
   opacity: 0.80;
 }
 .card > * { position: relative; z-index: 1; }
@@ -359,8 +356,7 @@ body {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.06), transparent 55%),
-    radial-gradient(110% 80% at 100% 0%, rgba(248,113,113,0.06), transparent 60%);
+    radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.06), transparent 55%);
   opacity: 0.80;
 }
 .artifact > * { position: relative; z-index: 1; }
@@ -404,9 +400,9 @@ body {
   inset: 10% 10% 22% 10%;
   border-radius: 14px;
   border: 1px dashed rgba(248,113,113,0.28);
-  background:
-    linear-gradient(180deg, rgba(248,113,113,0.12), rgba(245,245,247,0.04));
-  opacity: 0.65;
+  /* Red should live on edges only; keep the interior neutral. */
+  background: rgba(0,0,0,0.18);
+  opacity: 0.75;
 }
 .thumbhero__meta {
   position: absolute;
@@ -504,8 +500,7 @@ audio { width: 100%; }
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.06), transparent 55%),
-    radial-gradient(110% 80% at 100% 0%, rgba(248,113,113,0.06), transparent 60%);
+    radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,0.06), transparent 55%);
   opacity: 0.80;
 }
 .jobs__list > *, .jobs__detail > * { position: relative; z-index: 1; }
@@ -522,7 +517,11 @@ audio { width: 100%; }
   transition: background 140ms ease;
 }
 .jobitem:hover { background: rgba(255,255,255,0.03); }
-.jobitem--active { background: rgba(248,113,113,0.05); }
+.jobitem--active {
+  background: rgba(255,255,255,0.04);
+  /* Edge-only red: a thin inset rail instead of a red fill. */
+  box-shadow: inset 3px 0 0 rgba(248,113,113,0.32);
+}
 .jobitem__top { display: flex; gap: 8px; align-items: center; }
 .jobitem__id { font-family: "JetBrains Mono"; font-weight: 700; font-size: 12px; }
 .jobitem__type { font-family: "JetBrains Mono"; font-size: 12px; color: rgba(246,246,249,0.82); }
@@ -538,7 +537,7 @@ audio { width: 100%; }
 .jobdetail__title { font-family: "JetBrains Mono"; font-weight: 700; text-transform: uppercase; font-size: 12px; }
 .jobdetail__meta { font-size: 12px; color: var(--muted2); margin-top: 6px; }
 .bar { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden; border: 1px solid rgba(255,255,255,0.10); margin-top: 12px; }
-.bar__fill { height: 100%; width: 0%; background: linear-gradient(90deg, rgba(245,245,247,0.92), rgba(248,113,113,0.45)); }
+.bar__fill { height: 100%; width: 0%; background: linear-gradient(90deg, rgba(245,245,247,0.92), rgba(245,245,247,0.55)); }
 .bar__meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--muted2); font-family: "JetBrains Mono"; }
 
 .viz {
@@ -578,7 +577,7 @@ audio { width: 100%; }
 .viz__step--skip .viz__dot { background: rgba(246,246,249,0.20); }
 .viz__step--work .viz__dot {
   background: rgba(245,245,247,0.80);
-  box-shadow: 0 0 0 6px rgba(248,113,113,0.10);
+  box-shadow: 0 0 0 6px rgba(245,245,247,0.08);
   animation: pulse 1200ms ease-in-out infinite;
 }
 @keyframes pulse {
@@ -589,7 +588,7 @@ audio { width: 100%; }
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at 50% 0%, rgba(248,113,113,0.10), transparent 60%);
+  background: radial-gradient(circle at 50% 0%, rgba(255,255,255,0.06), transparent 60%);
   opacity: 0.9;
   pointer-events: none;
 }
@@ -695,10 +694,10 @@ audio { width: 100%; }
   cursor: pointer;
   transition: transform 140ms ease, border 140ms ease, background 140ms ease;
 }
-.cmdk__item:hover { transform: translateY(-1px); border-color: rgba(248,113,113,0.22); background: rgba(248,113,113,0.06); }
+.cmdk__item:hover { transform: translateY(-1px); border-color: rgba(248,113,113,0.22); background: rgba(255,255,255,0.03); }
 .cmdk__item--active {
   border-color: rgba(248,113,113,0.28);
-  background: rgba(248,113,113,0.08);
+  background: rgba(255,255,255,0.04);
 }
 .cmdk__name { font-family: "JetBrains Mono"; font-weight: 700; font-size: 12px; text-transform: uppercase; }
 .cmdk__desc { font-size: 12px; color: var(--muted2); margin-top: 3px; }
