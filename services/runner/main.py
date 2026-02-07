@@ -9,6 +9,7 @@ import traceback
 import logging
 import uuid
 import json
+import shutil
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.exception_handlers import http_exception_handler
@@ -333,10 +334,44 @@ async def generate_full_script(video_id: str, request: Request, force: bool = Fa
 
 @app.post("/api/tts/{video_id}")
 @app.post("/api/voice/{video_id}") # Alias
-async def generate_tts(video_id: str, request: Request):
+async def generate_tts(video_id: str, request: Request, force: bool = False):
     """Generate narration audio."""
     if not (os.getenv("GEMINI_API_KEY") or "").strip():
         return _json(request, 400, {"status": "error", "error": "missing_env", "message": "GEMINI_API_KEY is required", "video_id": video_id})
+
+    # Idempotent: if we already generated audio for this video, return it instead
+    # of re-running TTS (which can be slow / flaky / expensive).
+    if not force:
+        try:
+            tts_path = MEDIA_DIR / "tts" / f"{video_id}.wav"
+            narration_path = MEDIA_DIR / "audio" / video_id / "narration.wav"
+            if (not tts_path.exists()) and narration_path.exists():
+                tts_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(narration_path, tts_path)
+            if tts_path.exists():
+                a = db.get_audio(video_id) or {}
+                dur = float(a.get("duration_seconds") or 0.0) or float(voice_gen._get_wav_duration(str(tts_path)) or 0.0)
+                return _json(
+                    request,
+                    200,
+                    {
+                        "status": "success",
+                        "video_id": video_id,
+                        "audio_id": a.get("id"),
+                        "audio_path": str(tts_path),
+                        "audio_url": f"/api/media/tts/{video_id}.wav",
+                        "audio_file": a.get("audio_file_path") or str(narration_path),
+                        "narration_url": f"/api/media/audio/{video_id}/narration.wav",
+                        "duration_sec": dur,
+                        "duration": dur,
+                        "model_used": "cached",
+                        "attempts": [],
+                        "cached": True,
+                    },
+                )
+        except Exception:
+            # Cache is best-effort; fall through to generation.
+            pass
 
     # Ensure script exists; auto-generate if missing.
     try:
