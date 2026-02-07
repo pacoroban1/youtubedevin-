@@ -156,6 +156,15 @@ function setTab(name, opts = {}) {
 }
 
 function loadInitialTab() {
+  // Allow deep-linking for screenshots/sharing: /ui/?tab=designer
+  try {
+    const u = new URL(window.location.href);
+    const t = (u.searchParams.get("tab") || "").toLowerCase();
+    if (t && TABS.includes(t)) return t;
+  } catch {
+    // ignore
+  }
+
   try {
     const v = localStorage.getItem("autopilot_active_tab");
     if (v && TABS.includes(v)) return v;
