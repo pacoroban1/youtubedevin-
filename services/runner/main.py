@@ -276,13 +276,23 @@ async def verify_translate_support():
     Verifies that the configured translation provider can translate a short string.
     This is used when TRANSLATION_PROVIDER is enabled.
     """
-    provider = (os.getenv("TRANSLATION_PROVIDER") or "").strip().lower()
+    provider_env = (os.getenv("TRANSLATION_PROVIDER") or "").strip().lower()
+    provider = provider_env
+    if provider in ("", "auto"):
+        # Push-button default: if the user configured Google Translate but forgot
+        # to set TRANSLATION_PROVIDER, treat it as enabled.
+        if os.getenv("GOOGLE_CLOUD_API_KEY") or os.getenv("GOOGLE_API_KEY"):
+            provider = "google"
+        else:
+            provider = ""
+
     if provider in ("", "none", "gemini"):
         return {
             "status": "skipped",
             "provider": provider,
+            "provider_env": provider_env,
             "configured": False,
-            "note": "Set TRANSLATION_PROVIDER=google (or libretranslate) to enable translation verification.",
+            "note": "Set GOOGLE_CLOUD_API_KEY (and optionally TRANSLATION_PROVIDER=google) to enable translation verification.",
         }
 
     if provider in ("google", "gcloud", "translate"):
@@ -290,6 +300,7 @@ async def verify_translate_support():
             return {
                 "status": "error",
                 "provider": provider,
+                "provider_env": provider_env,
                 "configured": False,
                 "error": "Missing GOOGLE_CLOUD_API_KEY/GOOGLE_API_KEY",
             }
@@ -299,6 +310,7 @@ async def verify_translate_support():
             return {
                 "status": "success",
                 "provider": provider,
+                "provider_env": provider_env,
                 "configured": True,
                 "sample": {"en": "Hello world.", "am": sample},
             }
@@ -306,6 +318,7 @@ async def verify_translate_support():
             return {
                 "status": "error",
                 "provider": provider,
+                "provider_env": provider_env,
                 "configured": True,
                 "error": str(e),
             }
@@ -315,6 +328,7 @@ async def verify_translate_support():
             return {
                 "status": "error",
                 "provider": provider,
+                "provider_env": provider_env,
                 "configured": False,
                 "error": "Missing LIBRETRANSLATE_URL",
             }
@@ -324,6 +338,7 @@ async def verify_translate_support():
             return {
                 "status": "success",
                 "provider": provider,
+                "provider_env": provider_env,
                 "configured": True,
                 "sample": {"en": "Hello world.", "am": sample},
             }
@@ -331,6 +346,7 @@ async def verify_translate_support():
             return {
                 "status": "error",
                 "provider": provider,
+                "provider_env": provider_env,
                 "configured": True,
                 "error": str(e),
             }
@@ -338,6 +354,7 @@ async def verify_translate_support():
     return {
         "status": "error",
         "provider": provider,
+        "provider_env": provider_env,
         "configured": False,
         "error": f"Unknown TRANSLATION_PROVIDER={provider!r}",
     }
@@ -352,8 +369,17 @@ async def get_config():
             return default
         return val.strip().lower() in ("1", "true", "yes", "y", "on")
 
+    provider_env = (os.getenv("TRANSLATION_PROVIDER") or "").strip()
+    provider_eff = provider_env.strip().lower()
+    if provider_eff in ("", "auto"):
+        if os.getenv("GOOGLE_CLOUD_API_KEY") or os.getenv("GOOGLE_API_KEY"):
+            provider_eff = "google"
+        else:
+            provider_eff = ""
+
     return {
-        "translation_provider": (os.getenv("TRANSLATION_PROVIDER") or "").strip(),
+        "translation_provider": provider_eff,
+        "translation_provider_env": provider_env,
         "google_translate_configured": bool(os.getenv("GOOGLE_CLOUD_API_KEY") or os.getenv("GOOGLE_API_KEY")),
         "libretranslate": {
             "configured": bool(os.getenv("LIBRETRANSLATE_URL")),

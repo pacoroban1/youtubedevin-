@@ -27,7 +27,17 @@ class ScriptGenerator:
             self.model_fast = None
 
         # Optional translation step. Default keeps existing behavior (Gemini rewrite in Amharic).
-        self.translation_provider = (os.getenv("TRANSLATION_PROVIDER") or "").strip().lower()
+        #
+        # If you provide GOOGLE_CLOUD_API_KEY but forget to set TRANSLATION_PROVIDER, we
+        # default to Google translation so the "translate -> persona style" pipeline
+        # is push-button.
+        raw_provider = (os.getenv("TRANSLATION_PROVIDER") or "").strip().lower()
+        if raw_provider in ("", "auto"):
+            if os.getenv("GOOGLE_CLOUD_API_KEY") or os.getenv("GOOGLE_API_KEY"):
+                raw_provider = "google"
+            else:
+                raw_provider = ""
+        self.translation_provider = raw_provider
         self.translate_google = GoogleTranslateV2()
         self.translate_libre = LibreTranslate()
 

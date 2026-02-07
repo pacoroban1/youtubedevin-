@@ -260,11 +260,11 @@ If you want a more "structured" approach:
 2. Translate those beats using Google Cloud Translation API (paid) or LibreTranslate (open-source)
 3. Run a final Gemini pass to apply narrator persona + cinematic emotion + `[PAUSE]` markers
 
-Enable it by setting:
+Enable it by setting (if `GOOGLE_CLOUD_API_KEY` is set and `TRANSLATION_PROVIDER` is empty, it defaults to `google`):
 
 ```bash
 export GOOGLE_CLOUD_API_KEY=...
-export TRANSLATION_PROVIDER=google
+export TRANSLATION_PROVIDER=google  # optional (auto-default)
 export NARRATOR_PERSONA="futuristic captain"
 export SCRIPT_BEAT_SECONDS=20
 ```
