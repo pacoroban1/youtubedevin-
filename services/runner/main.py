@@ -8,6 +8,7 @@ from datetime import datetime
 import traceback
 import logging
 import uuid
+import json
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.exception_handlers import http_exception_handler
@@ -161,6 +162,26 @@ def _json(request: Request, status_code: int, payload: Dict[str, Any]) -> JSONRe
         payload["request_id"] = _req_id(request)
     return JSONResponse(status_code=status_code, content=payload, headers={"X-Request-ID": _req_id(request)})
 
+def _cached_full_script(video_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Best-effort cache layer: if we already have a full_script stored in the DB,
+    return the parsed JSON object. This avoids re-calling Gemini (cost + 429s).
+    """
+    try:
+        s = db.get_script(video_id)
+        if not s:
+            return None
+        raw = s.get("full_script")
+        if not raw:
+            return None
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str):
+            return json.loads(raw)
+    except Exception:
+        return None
+    return None
+
 async def _run_pipeline_full_job(job_id: str, request: FullPipelineRequest) -> None:
     step_names = ["discover", "ingest", "script", "voice", "render", "thumbnail", "upload", "distribute"]
     steps = JobStore.init_steps(step_names)
@@ -239,10 +260,26 @@ async def get_config(request: Request):
     })
 
 @app.post("/api/script/{video_id}")
-async def generate_script_preview(video_id: str, request: Request):
+async def generate_script_preview(video_id: str, request: Request, force: bool = False):
     """Legacy preview endpoint."""
     if not (os.getenv("GEMINI_API_KEY") or "").strip():
         return _json(request, 400, {"status": "error", "error": "missing_env", "message": "GEMINI_API_KEY is required", "video_id": video_id})
+
+    if not force:
+        cached = _cached_full_script(video_id)
+        if cached:
+            beats = cached.get("beats") or []
+            hook = (cached.get("hook") or "").strip()
+            out = {
+                "script_id": video_id,
+                "hook_text": hook,
+                "segments_count": len(beats),
+                "full_script_length": len(json.dumps(cached, ensure_ascii=False)),
+                "quality_score": cached.get("quality_score", 0.8),
+                "script_preview": hook,
+                "cached": True,
+            }
+            return _json(request, 200, {"status": "success", "video_id": video_id, **out})
 
     # If transcript missing, attempt ingest automatically to avoid confusing failures.
     try:
@@ -263,10 +300,19 @@ async def generate_script_preview(video_id: str, request: Request):
         return _json(request, 502, {"status": "error", "error": "script_generation_failed", "message": str(e), "video_id": video_id})
 
 @app.post("/api/script/full/{video_id}")
-async def generate_full_script(video_id: str, request: Request):
+async def generate_full_script(video_id: str, request: Request, force: bool = False):
     """Generate full structured script."""
     if not (os.getenv("GEMINI_API_KEY") or "").strip():
         return _json(request, 400, {"status": "error", "error": "missing_env", "message": "GEMINI_API_KEY is required", "video_id": video_id})
+
+    if not force:
+        cached = _cached_full_script(video_id)
+        if cached:
+            # Keep backward-compatible field name; downstream expects this.
+            out = dict(cached)
+            out["full_script"] = json.dumps(cached, ensure_ascii=False)
+            out["cached"] = True
+            return _json(request, 200, {"status": "success", "video_id": video_id, **out})
 
     try:
         t = db.get_transcript(video_id)

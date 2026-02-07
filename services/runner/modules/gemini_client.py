@@ -259,7 +259,25 @@ class GeminiClient:
                 if text.endswith("```"):
                     text = text[:-3].strip()
 
-                return json.loads(text)
+                # Gemini sometimes returns valid JSON with extra pre/post-amble text.
+                # Be conservative and attempt to extract the first JSON object/array.
+                try:
+                    return json.loads(text)
+                except Exception:
+                    candidate = None
+                    if "{" in text and "}" in text:
+                        start = text.find("{")
+                        end = text.rfind("}")
+                        if end > start:
+                            candidate = text[start : end + 1]
+                    if candidate is None and "[" in text and "]" in text:
+                        start = text.find("[")
+                        end = text.rfind("]")
+                        if end > start:
+                            candidate = text[start : end + 1]
+                    if candidate:
+                        return json.loads(candidate)
+                    raise
             except Exception as e:
                 attempts.append(
                     GeminiAttempt(
