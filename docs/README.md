@@ -158,6 +158,20 @@ make test
 docker-compose exec runner python -m unittest discover -s tests -p 'test_*.py'
 ```
 
+## ZThumb LoRA Fine-Tune (GPU)
+
+The repo includes a push-button LoRA fine-tune pipeline that trains on a GPU box and validates via the ZThumb API:
+
+```bash
+PRESET=quality make finetune_z
+```
+
+Outputs:
+- Exported adapter: `models/lora/<run_name>/`
+- Eval report: `outputs/lora_eval/<run_name>/report.md`
+
+See `SOURCE_OF_TRUTH.md` for the exact base model + pinned training deps.
+
 ## File Structure
 
 ```

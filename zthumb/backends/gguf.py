@@ -96,6 +96,7 @@ class GGUFBackend(BaseBackend):
         output_format: str,
         upscale: bool = False,
         face_detail: bool = False,
+        lora_path=None,
         lora_scale=None
     ) -> List[str]:
         """Generate images using GGUF/low-memory mode."""
@@ -112,7 +113,7 @@ class GGUFBackend(BaseBackend):
             self._generate_sync,
             prompt, negative_prompt, effective_width, effective_height, seed,
             min(steps, 25),  # Limit steps for speed
-            cfg, batch, output_dir, output_format, width, height, lora_scale
+            cfg, batch, output_dir, output_format, width, height, lora_path, lora_scale
         )
         
         # Post-process if requested
@@ -143,6 +144,7 @@ class GGUFBackend(BaseBackend):
         output_format: str,
         target_width: int,
         target_height: int,
+        lora_path,
         lora_scale
     ) -> List[str]:
         """Synchronous generation with memory optimization."""
@@ -150,7 +152,7 @@ class GGUFBackend(BaseBackend):
         from PIL import Image
         
         self._load_pipeline()
-        self.apply_lora(self.pipe, lora_scale=lora_scale)
+        self.apply_lora(self.pipe, lora_path=lora_path, lora_scale=lora_scale)
         
         images = []
         for i in range(batch):

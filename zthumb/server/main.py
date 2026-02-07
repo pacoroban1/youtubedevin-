@@ -70,6 +70,14 @@ class GenerateRequest(BaseModel):
     safe_mode: bool = Field(default=True, description="Block unsafe prompts")
     style_preset: Optional[StylePreset] = Field(default=None)
     subject: Optional[str] = Field(default=None, description="Subject for preset templates")
+    lora_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional LoRA adapter path override (inside the container). "
+            "If omitted, ZThumb uses Z_LORA_PATH/ZTHUMB_LORA_PATH env vars. "
+            "Set to an empty string to explicitly disable any env default for this request."
+        ),
+    )
     lora_scale: Optional[float] = Field(default=None, ge=0.0, le=2.0, description="Optional per-request LoRA scale override")
 
 
@@ -409,6 +417,7 @@ async def generate(request: GenerateRequest, background_tasks: BackgroundTasks):
                 output_format=request.output_format,
                 upscale=request.upscale,
                 face_detail=request.face_detail,
+                lora_path=request.lora_path,
                 lora_scale=request.lora_scale
             )
             images = generated

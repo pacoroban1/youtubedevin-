@@ -78,6 +78,7 @@ class AutoBackend(BaseBackend):
         output_format: str,
         upscale: bool = False,
         face_detail: bool = False,
+        lora_path=None,
         lora_scale=None
     ) -> List[str]:
         """Generate images using auto-selected backend."""
@@ -94,5 +95,6 @@ class AutoBackend(BaseBackend):
             output_format=output_format,
             upscale=upscale,
             face_detail=face_detail,
+            lora_path=lora_path,
             lora_scale=lora_scale
         )

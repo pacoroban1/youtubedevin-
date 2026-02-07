@@ -79,6 +79,7 @@ class TurboBackend(BaseBackend):
         output_format: str,
         upscale: bool = False,
         face_detail: bool = False,
+        lora_path=None,
         lora_scale=None
     ) -> List[str]:
         """Generate images using SDXL-Turbo."""
@@ -90,7 +91,7 @@ class TurboBackend(BaseBackend):
             self._generate_sync,
             prompt, negative_prompt, width, height, seed,
             min(steps, 4),  # Turbo works best with 1-4 steps
-            cfg, batch, output_dir, output_format, lora_scale
+            cfg, batch, output_dir, output_format, lora_path, lora_scale
         )
         
         # Post-process if requested
@@ -119,13 +120,14 @@ class TurboBackend(BaseBackend):
         batch: int,
         output_dir: Path,
         output_format: str,
+        lora_path,
         lora_scale
     ) -> List[str]:
         """Synchronous generation."""
         import torch
         
         self._load_pipeline()
-        self.apply_lora(self.pipe, lora_scale=lora_scale)
+        self.apply_lora(self.pipe, lora_path=lora_path, lora_scale=lora_scale)
         
         generator = torch.Generator(device=self.pipe.device).manual_seed(seed)
         

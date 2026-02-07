@@ -64,21 +64,55 @@ def download_with_progress(url: str, dest: Path, expected_size_gb: float):
     """Download file with progress indicator."""
     print(f"Downloading to {dest}...")
     print(f"Expected size: ~{expected_size_gb} GB")
-    
-    def progress_hook(count, block_size, total_size):
-        if total_size > 0:
-            percent = min(100, count * block_size * 100 // total_size)
-            downloaded_mb = count * block_size / (1024 * 1024)
-            total_mb = total_size / (1024 * 1024)
-            sys.stdout.write(f"\r  Progress: {percent}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)")
-            sys.stdout.flush()
-    
+
+    # Some HF assets are gated. If a token is present, pass it as a bearer token.
+    token = (
+        os.getenv("HF_TOKEN")
+        or os.getenv("HUGGINGFACE_HUB_TOKEN")
+        or os.getenv("HUGGINGFACE_TOKEN")
+    )
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    tmp = dest.with_suffix(dest.suffix + ".part")
     try:
-        urllib.request.urlretrieve(url, dest, reporthook=progress_hook)
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req) as resp, open(tmp, "wb") as f:
+            total = resp.headers.get("Content-Length")
+            total_size = int(total) if total and total.isdigit() else None
+
+            downloaded = 0
+            block_size = 1024 * 1024  # 1MB
+            while True:
+                chunk = resp.read(block_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+
+                if total_size:
+                    percent = min(100, int(downloaded * 100 / total_size))
+                    downloaded_mb = downloaded / (1024 * 1024)
+                    total_mb = total_size / (1024 * 1024)
+                    sys.stdout.write(f"\r  Progress: {percent}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)")
+                else:
+                    downloaded_mb = downloaded / (1024 * 1024)
+                    sys.stdout.write(f"\r  Downloaded: {downloaded_mb:.1f} MB")
+                sys.stdout.flush()
+
         print()  # New line after progress
+        tmp.replace(dest)
         return True
     except Exception as e:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
         print(f"\nDownload failed: {e}")
+        if not token and "huggingface.co" in url:
+            print("Hint: if this model is gated on Hugging Face, set HF_TOKEN and retry.")
         return False
 
 
@@ -162,9 +196,10 @@ def main():
     
     models_dir = Path(args.models_dir) if args.models_dir else get_models_dir()
     
+    ok = True
     if args.variant == "all":
         for variant in ["turbo", "full", "gguf"]:
-            download_model(variant, models_dir, args.force)
+            ok = download_model(variant, models_dir, args.force) and ok
     elif args.variant == "auto":
         # Detect VRAM
         vram_mb = args.vram
@@ -176,9 +211,12 @@ def main():
             except ImportError:
                 vram_mb = 0
         
-        download_recommended(vram_mb, models_dir)
+        ok = download_recommended(vram_mb, models_dir)
     else:
-        download_model(args.variant, models_dir, args.force)
+        ok = download_model(args.variant, models_dir, args.force)
+
+    if not ok:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-.PHONY: up down logs build clean test shell zthumb-up zthumb-down smoke run_zthumb train_lora eval_lora test_generate
+.PHONY: up down logs build clean test shell zthumb-up zthumb-down smoke run_zthumb train_lora eval_lora test_generate finetune_z
 
 # Start all services
 up:
@@ -100,6 +100,13 @@ eval_lora:
 # Call ZThumb API and copy 4 generated images into outputs/test_generate/
 test_generate:
 	@./scripts/test_generate.sh
+
+# Push-button SDXL LoRA fine-tune + export + API validation (GPU-only).
+# Presets:
+#   PRESET=fast make finetune_z
+#   PRESET=quality make finetune_z
+finetune_z:
+	@./scripts/finetune_z.sh
 
 # Import n8n workflows
 import-workflows:

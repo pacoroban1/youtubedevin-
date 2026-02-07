@@ -227,6 +227,30 @@ make run_zthumb
 make test_generate
 ```
 
+#### Push-Button GPU Fine-Tune (Recommended)
+
+For an “idiot-proof” pipeline tied to ZThumb inference, use:
+
+```bash
+# GPU-only (will fail loudly if no NVIDIA GPU is detected)
+PRESET=quality make finetune_z
+```
+
+What it does:
+- Prepares/validates the dataset (`datasets/thumbs/`)
+- Downloads SDXL base with SHA verification
+- Trains a LoRA (preset: `fast` or `quality`)
+- Exports the adapter to `models/lora/<run_name>/`
+- Validates the adapter by calling ZThumb `/generate` with `lora_scale=0` vs `0.8`
+- Writes a report at `outputs/lora_eval/<run_name>/report.md` (with side-by-side images)
+
+Cloud helpers:
+- `scripts/cloud/runpod_train.sh` (run on the cloud GPU box after SSH)
+- `scripts/cloud/fetch_artifact.sh` (pull the resulting `<run_name>.tar.gz` back to local)
+
+Source of truth (base model + pinned trainer deps):
+- `SOURCE_OF_TRUTH.md`
+
 ## Translation + Persona Recap (Optional)
 
 By default, the script module uses Gemini to generate a high-retention Amharic recap directly.

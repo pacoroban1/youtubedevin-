@@ -35,6 +35,7 @@ class BaseBackend(ABC):
         output_format: str,
         upscale: bool = False,
         face_detail: bool = False,
+        lora_path: Optional[str] = None,
         lora_scale: Optional[float] = None
     ) -> List[str]:
         """Generate images and return list of file paths."""
@@ -60,12 +61,16 @@ class BaseBackend(ABC):
         except ValueError as e:
             raise RuntimeError("Invalid Z_LORA_SCALE/ZTHUMB_LORA_SCALE (must be float)") from e
 
-    def apply_lora(self, pipe, lora_scale: Optional[float] = None) -> bool:
+    def apply_lora(self, pipe, lora_path: Optional[str] = None, lora_scale: Optional[float] = None) -> bool:
         """
         Optionally apply an SDXL LoRA (fine-tune) at inference time.
 
         This is intentionally env-driven so it works in Docker without adding
         new API surface area.
+
+        Per-request overrides:
+          - lora_path: when provided, overrides the env path. Empty string disables LoRA.
+          - lora_scale: when provided, overrides the env scale.
 
         Env vars:
           - Z_LORA_PATH (preferred) or ZTHUMB_LORA_PATH: path to LoRA weights (e.g. /outputs/lora/my_style_lora)
@@ -74,7 +79,16 @@ class BaseBackend(ABC):
         Returns:
           True if a LoRA path was provided and loading was attempted, else False.
         """
-        lora_path = self._env_lora_path()
+        # Allow per-request override. Empty string explicitly disables any env default.
+        if lora_path is not None:
+            lora_path = str(lora_path).strip()
+            if not lora_path:
+                return False
+        else:
+            lora_path = self._env_lora_path()
+            if lora_path:
+                lora_path = lora_path.strip()
+
         if not lora_path:
             return False
 
