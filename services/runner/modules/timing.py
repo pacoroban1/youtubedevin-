@@ -285,6 +285,14 @@ class TimingMatcher:
                 "-i", narration_audio,
                 "-map", "0:v",           # Use video from first input
                 "-map", "1:a",           # Use audio from second input (narration)
+            ]
+
+            # Apply video speed adjustment when audio is longer than video.
+            # (Previously computed but not actually applied.)
+            if video_filter != "null":
+                cmd += ["-filter:v", video_filter]
+
+            cmd += [
                 "-c:v", "libx264",       # Video codec
                 "-preset", "medium",
                 "-crf", "23",

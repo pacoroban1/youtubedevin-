@@ -84,6 +84,15 @@ The runner service exposes REST APIs for each pipeline step:
 | `/api/upload/{video_id}` | POST | Upload to YouTube |
 | `/api/distribute/{video_id}` | POST | Distribute to social platforms |
 | `/api/report/daily` | GET | Generate daily report |
+| `/api/config` | GET | Non-secret config summary for the UI |
+| `/api/verify/voice` | GET | Verify voice support (am-ET) |
+| `/api/verify/translate` | GET | Verify translation provider (optional) |
+| `/api/verify/zthumb` | GET | Verify ZThumb connectivity from runner (optional) |
+| `/api/jobs` | GET | List recent jobs (async runs) |
+| `/api/jobs/{job_id}` | GET | Get a single job |
+| `/api/jobs/pipeline/full` | POST | Start full pipeline as an async job (UI-friendly) |
+| `/api/jobs/{job_id}/cancel` | POST | Best-effort cancel an in-flight job |
+| `/api/pipeline/full` | POST | Run full pipeline synchronously (not recommended for UI) |
 
 ### n8n Workflows
 
@@ -105,7 +114,7 @@ The system enforces quality at each step:
 
 ## Database Schema
 
-PostgreSQL stores all pipeline data across 11 tables:
+PostgreSQL stores all pipeline data across 12 tables:
 
 - `channels` - Discovered YouTube channels
 - `videos` - Target videos for processing
@@ -118,6 +127,7 @@ PostgreSQL stores all pipeline data across 11 tables:
 - `metrics` - Performance metrics
 - `ab_tests` - A/B test configurations
 - `daily_reports` - Daily summary reports
+- `jobs` - Long-running job state for UI polling/cancellation
 
 ## TTS Voice Configuration
 
@@ -148,11 +158,11 @@ curl -X POST http://localhost:8000/api/ingest/VIDEO_ID
 ### Testing
 
 ```bash
-# Run tests
-docker-compose exec runner pytest
+# Run tests (recommended)
+make test
 
-# Test a specific module
-docker-compose exec runner pytest tests/test_voice.py
+# Or run directly inside the runner container
+docker-compose exec runner python -m unittest discover -s tests -p 'test_*.py'
 ```
 
 ## ZThumb Local Thumbnail Engine

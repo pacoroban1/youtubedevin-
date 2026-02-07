@@ -75,11 +75,14 @@ print("OK: ZThumb returned", len(imgs), "image(s)")
 print("First:", imgs[0])
 PY
 
-echo "[5/5] Runner voice verification gate..."
-VOICE_TMP="$(mktemp -t voice_verify.XXXXXX.json)"
-curl -fsS "${RUNNER_URL}/api/verify/voice" > "${VOICE_TMP}"
+if [ -z "${AZURE_SPEECH_KEY:-}" ]; then
+  echo "[5/5] Runner voice verification gate... SKIP (AZURE_SPEECH_KEY not set)"
+else
+  echo "[5/5] Runner voice verification gate..."
+  VOICE_TMP="$(mktemp -t voice_verify.XXXXXX.json)"
+  curl -fsS "${RUNNER_URL}/api/verify/voice" > "${VOICE_TMP}"
 
-python3 - "${VOICE_TMP}" <<'PY'
+  python3 - "${VOICE_TMP}" <<'PY'
 import json, sys
 path = sys.argv[1]
 data = json.load(open(path, "r", encoding="utf-8"))
@@ -95,6 +98,7 @@ if not test:
   sys.exit(1)
 print("OK: Azure TTS supports am-ET. Voices:", voices[:5])
 PY
+fi
 
 echo "[extra] 10-second ffmpeg encode inside runner container..."
 "${COMPOSE_CMD[@]}" exec -T runner bash -lc 'set -euo pipefail; rm -f /tmp/smoke.mp4; ffmpeg -hide_banner -y -f lavfi -i testsrc=size=1280x720:rate=30 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 10 -pix_fmt yuv420p -c:v libx264 -preset veryfast -crf 28 -c:a aac /tmp/smoke.mp4 >/dev/null; ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 /tmp/smoke.mp4'

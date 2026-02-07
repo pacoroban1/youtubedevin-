@@ -74,11 +74,36 @@ else
     echo -e "${YELLOW}  Selected: GGUF (CPU Fallback) - Low/No GPU${NC}"
 fi
 
+# Default envs for Docker Compose (can be overridden by user env or zthumb/.env).
+if [ -z "${ZTHUMB_ALLOW_REMOTE_DOWNLOAD:-}" ]; then
+    if [ "$VRAM_MB" -ge 8000 ]; then
+        ZTHUMB_ALLOW_REMOTE_DOWNLOAD="true"
+    else
+        ZTHUMB_ALLOW_REMOTE_DOWNLOAD="false"
+    fi
+fi
+
+if [ -z "${ZTHUMB_TURBO_MODEL_ID:-}" ]; then
+    if [ "$VRAM_MB" -ge 8000 ]; then
+        ZTHUMB_TURBO_MODEL_ID="stabilityai/sdxl-turbo"
+    else
+        ZTHUMB_TURBO_MODEL_ID="stabilityai/sd-turbo"
+    fi
+fi
+
 # Create directories
 echo ""
 echo -e "${YELLOW}[3/4] Setting up directories...${NC}"
 mkdir -p "$BASE_DIR/models" "$BASE_DIR/outputs"
 echo -e "${GREEN}  Created: $BASE_DIR/models/, $BASE_DIR/outputs/${NC}"
+
+# Optional: download models on the host so the container sees them under /models.
+if [ "${ZTHUMB_AUTO_DOWNLOAD_MODELS:-false}" = "true" ]; then
+    echo -e "${YELLOW}  Downloading recommended models (ZTHUMB_AUTO_DOWNLOAD_MODELS=true)...${NC}"
+    python3 scripts/download_models.py --variant auto --models-dir "$BASE_DIR/models" --vram "$VRAM_MB"
+else
+    echo -e "${YELLOW}  Skipping model download. To download: ZTHUMB_AUTO_DOWNLOAD_MODELS=true ./run_zthumb.sh${NC}"
+fi
 
 # Create .env if not exists
 if [ ! -f .env ]; then
@@ -103,6 +128,9 @@ else
     COMPOSE_CMD="docker-compose"
 fi
 
+ZTHUMB_DEFAULT_BACKEND="$BACKEND" \
+ZTHUMB_ALLOW_REMOTE_DOWNLOAD="$ZTHUMB_ALLOW_REMOTE_DOWNLOAD" \
+ZTHUMB_TURBO_MODEL_ID="$ZTHUMB_TURBO_MODEL_ID" \
 $COMPOSE_CMD up -d --build
 
 echo ""

@@ -152,9 +152,27 @@ CREATE TABLE IF NOT EXISTS daily_reports (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Jobs table: stores long-running job state for UI polling (pipeline runs, etc.)
+CREATE TABLE IF NOT EXISTS jobs (
+    id VARCHAR(64) PRIMARY KEY,
+    job_type VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    video_id VARCHAR(255),
+    current_step VARCHAR(100),
+    progress FLOAT DEFAULT 0,
+    request JSONB,
+    steps JSONB,
+    result JSONB,
+    error JSONB,
+    events JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_channels_composite_score ON channels(composite_score DESC);
 CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status);
 CREATE INDEX IF NOT EXISTS idx_videos_views_velocity ON videos(views_velocity DESC);
 CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads(upload_status);
 CREATE INDEX IF NOT EXISTS idx_metrics_recorded_at ON metrics(recorded_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at DESC);

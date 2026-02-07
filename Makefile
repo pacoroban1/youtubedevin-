@@ -40,7 +40,7 @@ clean:
 
 # Run tests
 test:
-	docker-compose exec runner pytest
+	docker-compose exec runner python -m unittest discover -s tests -p 'test_*.py'
 
 # Shell into runner container
 shell:

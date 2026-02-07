@@ -14,6 +14,7 @@ services:
     environment:
       - ZTHUMB_MODELS_DIR=/models
       - ZTHUMB_OUTPUTS_DIR=/outputs
+      - ZTHUMB_DEFAULT_BACKEND=${ZTHUMB_DEFAULT_BACKEND:-auto}
       - HF_HOME=/models/hf
       # CPU-friendly default; override to "stabilityai/sdxl-turbo" on Linux GPU if desired.
       - ZTHUMB_TURBO_MODEL_ID=${ZTHUMB_TURBO_MODEL_ID:-stabilityai/sd-turbo}

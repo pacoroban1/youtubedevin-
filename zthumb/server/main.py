@@ -206,15 +206,33 @@ def get_available_models() -> List[dict]:
     return models
 
 
+def get_default_variant() -> VariantType:
+    """
+    Optional default backend override (used when request.variant == auto).
+
+    This is set by `run_zthumb.sh` and/or env files:
+      - ZTHUMB_DEFAULT_BACKEND=auto|turbo|full|gguf
+    """
+    raw = (os.getenv("ZTHUMB_DEFAULT_BACKEND") or "auto").strip().lower()
+    try:
+        return VariantType(raw)
+    except Exception:
+        return VariantType.AUTO
+
+
 def select_backend(vram_mb: int, requested_variant: VariantType, available_models: List[dict]) -> str:
     """Select best backend based on VRAM and availability."""
     available_variants = {m["variant"] for m in available_models if m["available"]}
     allow_remote = os.getenv("ZTHUMB_ALLOW_REMOTE_DOWNLOAD", "false").strip().lower() in ("1", "true", "yes", "on")
     
-    # If the caller explicitly requests a variant, honor it even if the model
-    # isn't present locally. Backends can fall back to downloading from HF.
+    # If the caller explicitly requests a variant, honor it when available
+    # locally, or allow downloading only when explicitly enabled.
     if requested_variant != VariantType.AUTO:
-        return requested_variant.value
+        if requested_variant.value in available_variants:
+            return requested_variant.value
+        if allow_remote:
+            return requested_variant.value
+        return "placeholder"
     
     # Prefer locally available variants when present.
     if vram_mb >= 12000 and "full" in available_variants:
@@ -285,7 +303,7 @@ async def health():
     """Health check with GPU/VRAM info."""
     gpu_info = get_gpu_info()
     models = get_available_models()
-    backend = select_backend(gpu_info["vram_mb"], VariantType.AUTO, models)
+    backend = select_backend(gpu_info["vram_mb"], get_default_variant(), models)
     
     return HealthResponse(
         status="ok",
@@ -302,7 +320,7 @@ async def list_models():
     """List available models and variants."""
     gpu_info = get_gpu_info()
     models = get_available_models()
-    recommended = select_backend(gpu_info["vram_mb"], VariantType.AUTO, models)
+    recommended = select_backend(gpu_info["vram_mb"], get_default_variant(), models)
     lora = get_lora_status()
     
     return ModelsResponse(
@@ -344,7 +362,10 @@ async def generate(request: GenerateRequest, background_tasks: BackgroundTasks):
     # Get GPU info and select backend
     gpu_info = get_gpu_info()
     models = get_available_models()
-    backend = select_backend(gpu_info["vram_mb"], request.variant, models)
+    requested_variant = request.variant
+    if requested_variant == VariantType.AUTO:
+        requested_variant = get_default_variant()
+    backend = select_backend(gpu_info["vram_mb"], requested_variant, models)
     
     # Create output directory
     today = datetime.now().strftime("%Y-%m-%d")

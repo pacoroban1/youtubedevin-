@@ -3,10 +3,13 @@ Amharic Recap Autopilot - Runner Service
 Main FastAPI application that orchestrates the video recap pipeline.
 """
 
+import asyncio
+from datetime import datetime
+import traceback
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import os
 from pathlib import Path
 import httpx
@@ -14,6 +17,7 @@ from urllib.parse import urlparse
 
 from modules.discovery import ChannelDiscovery
 from modules.ingest import VideoIngest
+from modules.jobs import JobStore
 from modules.script import ScriptGenerator
 from modules.voice import VoiceGenerator
 from modules.timing import TimingMatcher
@@ -48,6 +52,10 @@ uploader = YouTubeUploader(db)
 growth = GrowthLoop(db)
 translate_google = GoogleTranslateV2()
 translate_libre = LibreTranslate()
+job_store = JobStore(db)
+
+# In-memory task handles for cancellation (job state itself is persisted in Postgres).
+_job_tasks: dict[str, asyncio.Task] = {}
 
 
 class DiscoveryRequest(BaseModel):
@@ -64,6 +72,126 @@ class ProcessVideoRequest(BaseModel):
 class FullPipelineRequest(BaseModel):
     video_id: Optional[str] = None
     auto_select: bool = True
+
+
+def _utc_ts() -> str:
+    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def _steps_progress(steps: Dict[str, Any]) -> float:
+    if not steps:
+        return 0.0
+    done = 0
+    total = 0
+    for _, s in steps.items():
+        st = (s or {}).get("status")
+        if st in ("pending", None):
+            total += 1
+            continue
+        if st in ("skipped",):
+            continue
+        total += 1
+        if st in ("ok", "error"):
+            done += 1
+    return float(done) / float(total) if total else 0.0
+
+
+def _mark_step(steps: Dict[str, Any], name: str, status: str, **extra: Any) -> None:
+    cur = dict(steps.get(name) or {})
+    cur["status"] = status
+    for k, v in extra.items():
+        cur[k] = v
+    steps[name] = cur
+
+
+async def _run_pipeline_full_job(job_id: str, request: FullPipelineRequest) -> None:
+    step_names = ["discover", "ingest", "script", "voice", "render", "thumbnail", "upload", "distribute"]
+    steps = JobStore.init_steps(step_names)
+    if request.video_id:
+        _mark_step(steps, "discover", "skipped")
+
+    job_store.update_job(job_id, status="running", steps=steps, current_step="discover", progress=0.0)
+    job_store.append_event(job_id, "pipeline started")
+
+    try:
+        video_id = request.video_id
+        if not video_id and request.auto_select:
+            _mark_step(steps, "discover", "running", started_at=_utc_ts())
+            job_store.update_job(job_id, steps=steps, current_step="discover", progress=_steps_progress(steps))
+
+            discovery_result = await discovery.discover_top_channels()
+            if discovery_result.get("videos"):
+                video_id = discovery_result["videos"][0]["video_id"]
+
+            if not video_id:
+                raise RuntimeError("auto-select found no videos (check YOUTUBE_API_KEY and discovery settings)")
+
+            _mark_step(steps, "discover", "ok", ended_at=_utc_ts(), video_id=video_id)
+            job_store.update_job(job_id, steps=steps, video_id=video_id, progress=_steps_progress(steps))
+        elif not video_id:
+            raise RuntimeError("missing video_id (and auto_select=false)")
+
+        job_store.update_job(job_id, video_id=video_id)
+
+        async def run_step(name: str, fn):
+            try:
+                st = job_store.get_job(job_id).status
+                if st in ("cancel_requested", "canceled"):
+                    raise asyncio.CancelledError()
+            except KeyError:
+                # If the job record disappeared, fail fast.
+                raise RuntimeError("job record missing during execution")
+
+            _mark_step(steps, name, "running", started_at=_utc_ts())
+            job_store.update_job(job_id, steps=steps, current_step=name, progress=_steps_progress(steps))
+            job_store.append_event(job_id, f"{name} started")
+            out = await fn()
+            _mark_step(steps, name, "ok", ended_at=_utc_ts(), summary=out)
+            job_store.update_job(job_id, steps=steps, progress=_steps_progress(steps))
+            job_store.append_event(job_id, f"{name} ok")
+            return out
+
+        # Step: ingest
+        ingest_out = await run_step("ingest", lambda: ingest.process_video(video_id))
+        # Step: script
+        script_out = await run_step("script", lambda: script_gen.generate_amharic_script(video_id))
+        # Step: voice
+        voice_out = await run_step("voice", lambda: voice_gen.generate_narration(video_id))
+        # Step: render
+        render_out = await run_step("render", lambda: timing.render_with_alignment(video_id))
+        # Step: thumbnail
+        thumb_out = await run_step("thumbnail", lambda: thumbnail_gen.generate_thumbnails(video_id))
+        # Step: upload
+        upload_out = await run_step("upload", lambda: uploader.upload_video(video_id))
+        # Step: distribute
+        dist_out = await run_step("distribute", lambda: growth.distribute_and_track(video_id))
+
+        result = {
+            "video_id": video_id,
+            "steps": {
+                "ingest": {"source": ingest_out.get("source")},
+                "script": {"quality_score": script_out.get("quality_score")},
+                "voice": {"duration_seconds": voice_out.get("duration")},
+                "render": {"alignment_score": render_out.get("alignment_score")},
+                "thumbnail": {"selected": thumb_out.get("selected")},
+                "upload": {"youtube_video_id": upload_out.get("youtube_video_id")},
+                "distribute": {"platforms": dist_out.get("platforms")},
+            },
+        }
+        job_store.update_job(job_id, status="succeeded", current_step=None, progress=1.0, steps=steps, result=result)
+        job_store.append_event(job_id, "pipeline succeeded")
+    except asyncio.CancelledError:
+        job_store.update_job(job_id, status="canceled", current_step=None, steps=steps, progress=_steps_progress(steps))
+        job_store.append_event(job_id, "pipeline canceled", level="warn")
+        raise
+    except Exception as e:
+        # Mark current step as failed if possible.
+        cur = next((n for n in step_names if (steps.get(n) or {}).get("status") == "running"), None)
+        if cur:
+            _mark_step(steps, cur, "error", ended_at=_utc_ts(), error=str(e))
+        err = {"message": str(e), "traceback": traceback.format_exc()}
+        job_store.update_job(job_id, status="failed", current_step=None, steps=steps, progress=_steps_progress(steps), error=err)
+        job_store.append_event(job_id, f"pipeline failed: {e}", level="err")
 
 
 @app.get("/")
@@ -519,6 +647,79 @@ async def run_full_pipeline(request: FullPipelineRequest, background_tasks: Back
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/jobs")
+async def list_jobs(limit: int = 20):
+    """List recent jobs (most recent first)."""
+    try:
+        jobs = job_store.list_jobs(limit=limit)
+        return {"status": "success", "jobs": [j.to_dict() for j in jobs]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job(job_id: str):
+    """Get a single job by id."""
+    try:
+        job = job_store.get_job(job_id)
+        return {"status": "success", "job": job.to_dict()}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/jobs/pipeline/full")
+async def create_pipeline_full_job(request: FullPipelineRequest):
+    """
+    Run the complete pipeline end-to-end as an async job.
+    The UI should call this endpoint instead of blocking on /api/pipeline/full.
+    """
+    if not request.video_id and not request.auto_select:
+        raise HTTPException(status_code=400, detail="video_id is required when auto_select=false")
+
+    step_names = ["discover", "ingest", "script", "voice", "render", "thumbnail", "upload", "distribute"]
+    steps = JobStore.init_steps(step_names)
+    if request.video_id:
+        _mark_step(steps, "discover", "skipped")
+
+    job = job_store.create_job(
+        "pipeline_full",
+        request=request.model_dump(),
+        video_id=request.video_id,
+        steps=steps,
+    )
+
+    task = asyncio.create_task(_run_pipeline_full_job(job.id, request))
+    _job_tasks[job.id] = task
+    task.add_done_callback(lambda _t, jid=job.id: _job_tasks.pop(jid, None))
+
+    return {"status": "success", "job": job.to_dict()}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    """
+    Best-effort cancellation for in-flight jobs.
+
+    Note: many pipeline steps call blocking subprocesses (ffmpeg/yt-dlp),
+    so cancellation may not interrupt immediately.
+    """
+    try:
+        _ = job_store.get_job(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    job_store.update_job(job_id, status="cancel_requested")
+    job_store.append_event(job_id, "cancel requested", level="warn")
+
+    task = _job_tasks.get(job_id)
+    if task:
+        task.cancel()
+
+    return {"status": "success", "job_id": job_id}
 
 
 @app.get("/api/report/daily")

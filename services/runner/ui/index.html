@@ -44,6 +44,7 @@
           </div>
           <div class="panel__actions">
             <button class="btn btn--primary" id="btnFull" type="button">Full Pipeline</button>
+            <button class="btn btn--ghost" id="btnCancelJob" type="button" disabled>Cancel Job</button>
           </div>
         </div>
 
@@ -107,6 +108,54 @@
           </div>
         </div>
 
+        <div class="jobs">
+          <div class="jobs__hd">
+            <div>
+              <div class="jobs__title">Jobs</div>
+              <div class="jobs__meta">Recent async runs. Click a job to inspect.</div>
+            </div>
+            <div class="jobs__actions">
+              <button class="btn btn--ghost" id="btnJobsRefresh" type="button">Refresh Jobs</button>
+            </div>
+          </div>
+
+          <div class="jobs__grid">
+            <div class="jobs__list" id="jobsList">
+              <div class="jobs__empty">No jobs yet.</div>
+            </div>
+            <div class="jobs__detail" id="jobDetail">
+              <div class="jobdetail__empty" id="jobDetailEmpty">No job selected.</div>
+
+              <div class="jobdetail" id="jobDetailBody" hidden>
+                <div class="jobdetail__hd">
+                  <div>
+                    <div class="jobdetail__title" id="jobTitle">Job</div>
+                    <div class="jobdetail__meta" id="jobMeta"></div>
+                  </div>
+                </div>
+
+                <div class="bar">
+                  <div class="bar__fill" id="jobBar"></div>
+                </div>
+                <div class="bar__meta">
+                  <span class="bar__pct" id="jobPct">0%</span>
+                  <span class="bar__hint" id="jobHint"></span>
+                </div>
+
+                <div class="steps" id="jobSteps"></div>
+
+                <div class="events">
+                  <div class="events__hd">
+                    <div class="events__title">Events</div>
+                    <div class="events__meta">Most recent first</div>
+                  </div>
+                  <div class="events__bd" id="jobEvents"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <pre class="json" id="jsonOut">{}</pre>
 
         <div class="logs">
@@ -133,4 +182,3 @@
     </footer>
   </body>
 </html>
-
