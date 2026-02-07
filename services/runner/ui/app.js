@@ -783,7 +783,9 @@ async function selectJob(jobId, opts = {}) {
   const { pollIfRunning = false, silent = false } = opts;
   if (!jobId) return;
   currentJobId = jobId;
-  setTab("monitor", { silent: true });
+  // Only jump to Monitor when the user explicitly selects a job.
+  // Auto-select (silent) should not hijack the current view (e.g. deep-links to Designer).
+  if (!silent) setTab("monitor", { silent: true });
   if (!silent) {
     setStatus("working", `job: ${shortId(jobId)}`);
     log("job", `loading: ${jobId}`);
