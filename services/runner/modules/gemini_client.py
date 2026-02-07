@@ -44,6 +44,30 @@ def _maybe_b64decode_media(data: bytes) -> bytes:
             return data
     return data
 
+def _maybe_b64decode_audio(data: bytes) -> bytes:
+    if not data:
+        return data
+    # Base64 prefixes for common audio headers:
+    # - WAV "RIFF" -> "UklG"
+    # - MP3 "ID3"  -> "SUQz"
+    if data.startswith(b"UklG") or data.startswith(b"SUQz"):
+        try:
+            dec = base64.b64decode(data)
+            if dec.startswith(b"RIFF") or dec.startswith(b"ID3") or dec[:2] == b"\xff\xfb":
+                return dec
+        except Exception:
+            return data
+
+    # Heuristic: if it looks like base64 text, try decode and validate header.
+    if all(c in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\n\r" for c in data[:128]):
+        try:
+            dec = base64.b64decode(data)
+            if dec.startswith(b"RIFF") or dec.startswith(b"ID3") or dec[:2] == b"\xff\xfb":
+                return dec
+        except Exception:
+            pass
+    return data
+
 
 def _extract_status_code(exc: Exception) -> Optional[int]:
     # Try the common places Google libraries stash status codes.
@@ -421,10 +445,10 @@ class GeminiClient:
                 if not data:
                     continue
                 if isinstance(data, bytes):
-                    return data
+                    return _maybe_b64decode_audio(data)
                 if isinstance(data, str):
                     try:
-                        return base64.b64decode(data)
+                        return _maybe_b64decode_audio(base64.b64decode(data))
                     except Exception:
                         continue
 
@@ -436,10 +460,10 @@ class GeminiClient:
             if not data:
                 continue
             if isinstance(data, bytes):
-                return data
+                return _maybe_b64decode_audio(data)
             if isinstance(data, str):
                 try:
-                    return base64.b64decode(data)
+                    return _maybe_b64decode_audio(base64.b64decode(data))
                 except Exception:
                     continue
 

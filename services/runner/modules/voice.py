@@ -5,6 +5,7 @@ Generates Amharic narration using Gemini TTS models.
 
 import os
 import asyncio
+import base64
 import logging
 import wave
 import contextlib
@@ -146,10 +147,32 @@ class VoiceGenerator:
             }
 
         # Write required path + legacy pipeline path.
-        with open(tts_path, "wb") as f:
-            f.write(audio_bytes)
-        with open(final_audio_path, "wb") as f:
-            f.write(audio_bytes)
+        # The SDK sometimes returns raw PCM bytes (no RIFF header) or base64 text bytes.
+        # Ensure we always write a valid WAV container.
+        wav_bytes = audio_bytes
+        if not wav_bytes.startswith(b"RIFF"):
+            # Try base64 decode first (common for inline_data).
+            try:
+                dec = base64.b64decode(wav_bytes, validate=False)
+                if dec.startswith(b"RIFF"):
+                    wav_bytes = dec
+            except Exception:
+                pass
+
+        if wav_bytes.startswith(b"RIFF"):
+            with open(tts_path, "wb") as f:
+                f.write(wav_bytes)
+            with open(final_audio_path, "wb") as f:
+                f.write(wav_bytes)
+        else:
+            # Assume raw 16-bit PCM mono. Wrap into a WAV file so tools can read it.
+            sample_rate = int(os.getenv("TTS_SAMPLE_RATE") or "24000")
+            for p in (tts_path, final_audio_path):
+                with wave.open(p, "wb") as w:
+                    w.setnchannels(1)
+                    w.setsampwidth(2)
+                    w.setframerate(sample_rate)
+                    w.writeframes(wav_bytes)
 
         duration = self._get_wav_duration(tts_path)
 
