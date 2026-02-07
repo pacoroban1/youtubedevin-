@@ -181,6 +181,14 @@ def main() -> None:
     lora_layers = AttnProcsLayers(pipe.unet.attn_processors)
     lora_layers.to(device)
 
+    def save_lora(save_dir: Path) -> None:
+        # Prefer safetensors output when supported by this diffusers version.
+        save_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            pipe.save_lora_weights(save_directory=str(save_dir), unet_lora_layers=lora_layers, safe_serialization=True)
+        except TypeError:
+            pipe.save_lora_weights(save_directory=str(save_dir), unet_lora_layers=lora_layers)
+
     optimizer = torch.optim.AdamW(lora_layers.parameters(), lr=args.lr)
     scaler = torch.cuda.amp.GradScaler(enabled=(device == "cuda" and tier.mixed_precision == "fp16"))
 
@@ -284,13 +292,12 @@ def main() -> None:
 
             if args.save_every and step > 0 and step % args.save_every == 0:
                 ckpt = out_dir / f"checkpoint-{step}"
-                ckpt.mkdir(parents=True, exist_ok=True)
-                pipe.save_lora_weights(save_directory=str(ckpt), unet_lora_layers=lora_layers)
+                save_lora(ckpt)
 
             step += 1
 
     # Save final adapter
-    pipe.save_lora_weights(save_directory=str(out_dir), unet_lora_layers=lora_layers)
+    save_lora(out_dir)
 
     meta = {
         "base_model": base_model,

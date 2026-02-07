@@ -96,6 +96,13 @@ if [ ! -d "$EXPORT_OUT" ]; then
   exit 2
 fi
 
+WEIGHTS_FILE="$EXPORT_OUT/pytorch_lora_weights.safetensors"
+if [ ! -f "$WEIGHTS_FILE" ]; then
+  echo "ERROR: expected safetensors weights missing: $WEIGHTS_FILE" >&2
+  echo "Check training output under: $EXPORT_OUT" >&2
+  exit 2
+fi
+
 ART_DIR="outputs/finetune_z/artifacts"
 mkdir -p "$ART_DIR"
 TARBALL="$ART_DIR/${RUN_NAME_DETECTED}.tar.gz"
@@ -114,6 +121,7 @@ case "$UPLOAD_METHOD" in
     fi
     echo "[cloud] uploading via rclone -> $RCLONE_DEST"
     rclone copy "$TARBALL" "$RCLONE_DEST"
+    rclone copy "$WEIGHTS_FILE" "$RCLONE_DEST"
     ;;
   gsutil)
     if [ -z "$GSUTIL_DEST" ]; then
@@ -125,7 +133,7 @@ case "$UPLOAD_METHOD" in
       exit 2
     fi
     echo "[cloud] uploading via gsutil -> $GSUTIL_DEST"
-    gsutil cp "$TARBALL" "$GSUTIL_DEST/"
+    gsutil cp "$TARBALL" "$WEIGHTS_FILE" "$GSUTIL_DEST/"
     ;;
   scp)
     if [ -z "$SCP_DEST" ]; then
@@ -137,7 +145,7 @@ case "$UPLOAD_METHOD" in
       exit 2
     fi
     echo "[cloud] uploading via scp -> $SCP_DEST"
-    scp "$TARBALL" "$SCP_DEST"
+    scp "$TARBALL" "$WEIGHTS_FILE" "$SCP_DEST"
     ;;
   *)
     echo "ERROR: unknown UPLOAD_METHOD=$UPLOAD_METHOD (use rclone|gsutil|scp)" >&2
@@ -149,4 +157,3 @@ echo ""
 echo "OK: uploaded LoRA artifact:"
 echo "  run_name=$RUN_NAME_DETECTED"
 echo "  tarball=$TARBALL"
-
