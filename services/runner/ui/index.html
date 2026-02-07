@@ -301,7 +301,7 @@
       </aside>
     </main>
 
-    <!-- Bottom: Activity Stream -->
+    <!-- Bottom: Activity Stream + AI Chat -->
     <footer class="activity-stream">
       <div class="activity-stream__header">
         <span class="activity-stream__title">NEURAL ACTIVITY</span>
@@ -311,6 +311,21 @@
         <div class="activity-item">
           <span class="activity-item__prefix">&gt;&gt;</span>
           <span class="activity-item__text">System initialized. Neural core ready. Awaiting command.</span>
+        </div>
+      </div>
+      
+      <!-- AI Chat Input -->
+      <div class="ai-chat">
+        <div class="ai-chat__input-wrapper">
+          <span class="ai-chat__prefix">AI&gt;</span>
+          <input type="text" id="aiChatInput" class="ai-chat__input" placeholder="Talk to me... schedule, automate, paste a video URL, or ask anything..." autocomplete="off" />
+          <button class="ai-chat__send" id="btnSendChat" title="Send">&#9654;</button>
+        </div>
+        <div class="ai-chat__suggestions">
+          <button class="ai-chat__suggestion" data-cmd="run">Run automation now</button>
+          <button class="ai-chat__suggestion" data-cmd="schedule">Schedule for 6 AM</button>
+          <button class="ai-chat__suggestion" data-cmd="status">Check status</button>
+          <button class="ai-chat__suggestion" data-cmd="help">What can you do?</button>
         </div>
       </div>
     </footer>

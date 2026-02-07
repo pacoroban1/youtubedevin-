@@ -537,6 +537,117 @@ function checkScheduledRun() {
 }
 
 // Initialize
+// AI Chat - Process user input
+async function processAIChat(input) {
+  const lowerInput = input.toLowerCase().trim();
+  
+  // Show typing indicator
+  addActivity('AI is thinking...', 'info');
+  
+  // Simulate AI processing delay
+  await new Promise(r => setTimeout(r, 500 + Math.random() * 500));
+  
+  // Parse commands and respond intelligently
+  if (lowerInput.includes('run') || lowerInput.includes('start') || lowerInput.includes('execute') || lowerInput.includes('go')) {
+    addActivity('AI: Starting automation pipeline now...', 'success');
+    addDecision('User requested immediate execution', 'info');
+    runAutomation();
+    return;
+  }
+  
+  if (lowerInput.includes('schedule')) {
+    const timeMatch = lowerInput.match(/(\d{1,2})\s*(am|pm|:00)?/i);
+    if (timeMatch) {
+      let hour = parseInt(timeMatch[1]);
+      if (timeMatch[2]?.toLowerCase() === 'pm' && hour < 12) hour += 12;
+      if (timeMatch[2]?.toLowerCase() === 'am' && hour === 12) hour = 0;
+      
+      state.schedule.hour = hour;
+      state.schedule.enabled = true;
+      saveState();
+      updateScheduleUI();
+      
+      const ampm = hour >= 12 ? 'PM' : 'AM';
+      const displayHour = hour % 12 || 12;
+      addActivity(`AI: Schedule set for ${displayHour}:00 ${ampm} daily`, 'success');
+      addDecision(`Automation scheduled for ${displayHour}:00 ${ampm}`, 'success');
+    } else {
+      openScheduleModal();
+      addActivity('AI: Opening schedule configuration...', 'info');
+    }
+    return;
+  }
+  
+  if (lowerInput.includes('status') || lowerInput.includes('how') || lowerInput.includes('what')) {
+    const scheduleStatus = state.schedule.enabled ? `enabled for ${state.predictions.postTime}` : 'disabled';
+    addActivity(`AI: System is online. Schedule is ${scheduleStatus}. ${state.stats.total} videos processed total.`, 'info');
+    addDecision('Status check requested', 'info');
+    return;
+  }
+  
+  if (lowerInput.includes('help') || lowerInput.includes('can you') || lowerInput.includes('what can')) {
+    addActivity('AI: I can run automation, schedule posts, check status, process video URLs, and answer questions about your recap pipeline.', 'info');
+    addDecision('Help requested', 'info');
+    return;
+  }
+  
+  if (lowerInput.includes('stop') || lowerInput.includes('cancel') || lowerInput.includes('disable')) {
+    state.schedule.enabled = false;
+    saveState();
+    updateScheduleUI();
+    addActivity('AI: Automation schedule disabled.', 'info');
+    addDecision('Schedule disabled by user', 'info');
+    return;
+  }
+  
+  // Check for YouTube URL
+  const youtubeMatch = lowerInput.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  if (youtubeMatch) {
+    addActivity(`AI: Detected YouTube video ${youtubeMatch[1]}. Starting processing...`, 'success');
+    addDecision(`Processing video: ${youtubeMatch[1]}`, 'info');
+    runAutomation();
+    return;
+  }
+  
+  // Default intelligent response
+  const responses = [
+    'AI: I understand. Try saying "run" to start automation or "schedule for 6 AM" to set a schedule.',
+    'AI: Got it! You can ask me to run the pipeline, check status, or schedule automation.',
+    'AI: I\'m here to help. Say "run" to start, "schedule" to configure timing, or paste a YouTube URL.',
+    'AI: Ready to assist! I can automate your Amharic recap workflow. What would you like to do?'
+  ];
+  addActivity(responses[Math.floor(Math.random() * responses.length)], 'info');
+  addDecision('Natural language query processed', 'info');
+}
+
+// Handle AI chat input
+function handleAIChatInput() {
+  const input = $('aiChatInput');
+  if (!input || !input.value.trim()) return;
+  
+  const userMessage = input.value.trim();
+  addActivity(`You: ${userMessage}`, 'info');
+  input.value = '';
+  
+  processAIChat(userMessage);
+}
+
+// Handle suggestion click
+function handleSuggestionClick(cmd) {
+  const commands = {
+    'run': 'Run automation now',
+    'schedule': 'Schedule for 6 AM',
+    'status': 'What is the current status?',
+    'help': 'What can you do?'
+  };
+  
+  const input = $('aiChatInput');
+  if (input) {
+    input.value = commands[cmd] || cmd;
+    handleAIChatInput();
+  }
+}
+
 function init() {
   loadState();
   
@@ -546,6 +657,17 @@ function init() {
   $('btnCloseSchedule')?.addEventListener('click', closeScheduleModal);
   $('btnSaveSchedule')?.addEventListener('click', saveSchedule);
   $('btnCloseOutput')?.addEventListener('click', closeOutputModal);
+  
+  // Wire up AI chat
+  $('btnSendChat')?.addEventListener('click', handleAIChatInput);
+  $('aiChatInput')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') handleAIChatInput();
+  });
+  
+  // Wire up suggestion buttons
+  document.querySelectorAll('.ai-chat__suggestion').forEach(btn => {
+    btn.addEventListener('click', () => handleSuggestionClick(btn.dataset.cmd));
+  });
   
   // Close modals on backdrop click
   $('scheduleModal')?.querySelector('.modal__backdrop')?.addEventListener('click', closeScheduleModal);
