@@ -52,15 +52,21 @@ const els = {
   audioEl: $("audioEl"),
   audioLink: $("audioLink"),
   audioMeta: $("audioMeta"),
+  waveCanvas: $("waveCanvas"),
 
   scriptHook: $("scriptHook"),
   scriptMeta: $("scriptMeta"),
   btnCopyHook: $("btnCopyHook"),
 
+  btnSafe: $("btnSafe"),
+  btnDownloadThumb: $("btnDownloadThumb"),
+
   cmdk: $("cmdk"),
   cmdkBackdrop: $("cmdkBackdrop"),
   cmdkInput: $("cmdkInput"),
   cmdkList: $("cmdkList"),
+
+  pipelineViz: $("pipelineViz"),
 };
 
 const btns = [
@@ -99,6 +105,8 @@ let currentJobStatus = null;
 let jobPollInFlight = false;
 let selectedThumbUrl = null;
 let lastHookText = "";
+let safeAreaOn = false;
+let waveformUrl = null;
 
 function ts() {
   const d = new Date();
@@ -154,9 +162,17 @@ function clearArtifacts() {
   lastHookText = "";
   if (els.thumbGrid) els.thumbGrid.innerHTML = `<div class="thumbs__empty">Generate thumbnails to see previews here.</div>`;
   if (els.thumbHero) els.thumbHero.hidden = true;
+  if (els.thumbHero) els.thumbHero.classList.remove("thumbhero--guides");
   if (els.thumbHeroImg) els.thumbHeroImg.removeAttribute("src");
   if (els.thumbHeroMeta) els.thumbHeroMeta.textContent = "";
   if (els.audioEl) els.audioEl.removeAttribute("src");
+  if (els.waveCanvas) {
+    const ctx = els.waveCanvas.getContext("2d");
+    if (ctx) {
+      ctx.clearRect(0, 0, els.waveCanvas.width, els.waveCanvas.height);
+    }
+  }
+  waveformUrl = null;
   if (els.audioLink) {
     els.audioLink.hidden = true;
     els.audioLink.href = "#";
@@ -174,11 +190,13 @@ function setSelectedThumb(url, metaText) {
     els.thumbHero.hidden = true;
     els.thumbHeroImg.removeAttribute("src");
     els.thumbHeroMeta.textContent = "";
+    if (els.btnDownloadThumb) els.btnDownloadThumb.disabled = true;
     return;
   }
   els.thumbHero.hidden = false;
   els.thumbHeroImg.src = url;
   els.thumbHeroMeta.textContent = metaText || "Selected thumbnail";
+  if (els.btnDownloadThumb) els.btnDownloadThumb.disabled = false;
 }
 
 function renderArtifacts(payload) {
@@ -251,6 +269,10 @@ function renderArtifacts(payload) {
   const audioUrl = firstDefined(payload.audio_url, normalizeMediaUrl(payload.audio_path), normalizeMediaUrl(payload.audio_file));
   if (audioUrl && els.audioEl) {
     els.audioEl.src = audioUrl;
+    if (audioUrl !== waveformUrl) {
+      waveformUrl = audioUrl;
+      drawWaveform(audioUrl).catch(() => {});
+    }
     if (els.audioLink) {
       els.audioLink.hidden = false;
       els.audioLink.href = audioUrl;
@@ -482,6 +504,16 @@ function stepClassForStatus(st) {
   return "";
 }
 
+function vizClassForStatus(st) {
+  const s = String(st || "").toLowerCase();
+  if (s === "ok") return "viz__step--ok";
+  if (s === "error") return "viz__step--err";
+  if (s === "skipped") return "viz__step--skip";
+  if (s === "running") return "viz__step--work";
+  if (s === "pending" || s === "") return "";
+  return "";
+}
+
 function statusKindForJob(job) {
   const st = (job?.status || "").toLowerCase();
   if (st === "succeeded") return "ok";
@@ -567,6 +599,20 @@ function renderJobDetail(job) {
   if (els.jobBar) els.jobBar.style.width = `${pct.toFixed(0)}%`;
   if (els.jobPct) els.jobPct.textContent = `${pct.toFixed(0)}%`;
   if (els.jobHint) els.jobHint.textContent = job.current_step ? `Running: ${job.current_step}` : "";
+
+  // Pipeline visualization
+  if (els.pipelineViz) {
+    els.pipelineViz.innerHTML = "";
+    const steps = job.steps || {};
+    for (const name of PIPELINE_STEPS) {
+      const st = (steps?.[name]?.status || "").toLowerCase();
+      const cls = vizClassForStatus(st);
+      const cell = document.createElement("div");
+      cell.className = `viz__step ${cls}`.trim();
+      cell.innerHTML = `<div class="viz__dot"></div><div class="viz__name">${escapeHtml(name)}</div>`;
+      els.pipelineViz.appendChild(cell);
+    }
+  }
 
   // Steps
   if (els.jobSteps) {
@@ -777,6 +823,22 @@ function wire() {
     }
   });
 
+  els.btnSafe?.addEventListener("click", () => {
+    safeAreaOn = !safeAreaOn;
+    if (els.thumbHero) els.thumbHero.classList.toggle("thumbhero--guides", safeAreaOn);
+    log("ui", `safe area: ${safeAreaOn ? "on" : "off"}`);
+  });
+
+  els.btnDownloadThumb?.addEventListener("click", () => {
+    if (!selectedThumbUrl) return;
+    const a = document.createElement("a");
+    a.href = selectedThumbUrl;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+
   // Command palette wiring.
   els.cmdkBackdrop?.addEventListener("click", closeCmdk);
   els.cmdkInput?.addEventListener("input", () => {
@@ -912,3 +974,78 @@ function wire() {
 setStatus("idle", "Idle");
 wire();
 refresh().catch(() => {});
+
+async function drawWaveform(url) {
+  if (!els.waveCanvas) return;
+  const canvas = els.waveCanvas;
+  // Match CSS width for crisp rendering
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+  canvas.height = Math.max(1, Math.floor((canvas.getAttribute("height") ? Number(canvas.getAttribute("height")) : 64) * dpr));
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "rgba(0,0,0,0.12)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  let buf;
+  try {
+    const res = await fetch(url);
+    buf = await res.arrayBuffer();
+  } catch {
+    return;
+  }
+
+  let audioBuffer;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ac = new AC();
+    audioBuffer = await ac.decodeAudioData(buf.slice(0));
+    // Close ASAP (Safari can keep it alive otherwise).
+    if (typeof ac.close === "function") ac.close().catch(() => {});
+  } catch {
+    return;
+  }
+
+  const data = audioBuffer.getChannelData(0);
+  const W = canvas.width;
+  const H = canvas.height;
+  const mid = H / 2;
+  const step = Math.max(1, Math.floor(data.length / W));
+
+  // Background grid
+  ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += Math.floor(44 * dpr)) {
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, H);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(34,211,238,0.55)";
+  ctx.lineWidth = Math.max(1, Math.floor(1.2 * dpr));
+  ctx.beginPath();
+
+  for (let x = 0; x < W; x++) {
+    let min = 1.0;
+    let max = -1.0;
+    const start = x * step;
+    const end = Math.min(data.length, start + step);
+    for (let i = start; i < end; i++) {
+      const v = data[i];
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const y1 = mid + min * (H * 0.38);
+    const y2 = mid + max * (H * 0.38);
+    ctx.moveTo(x, y1);
+    ctx.lineTo(x, y2);
+  }
+
+  ctx.stroke();
+}
