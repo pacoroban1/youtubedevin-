@@ -1,40 +1,83 @@
-/* Simple Automation UI - One Button, Show Progress */
+/* CO-TOMATE Style Automation UI */
 
 const $ = (id) => document.getElementById(id);
 
 // Elements
 const els = {
+  // Status
   statusDot: $("statusDot"),
   statusText: $("statusText"),
   
-  startSection: $("startSection"),
-  progressSection: $("progressSection"),
-  completeSection: $("completeSection"),
-  errorSection: $("errorSection"),
+  // Tabs
+  tabWorkflow: $("tabWorkflow"),
+  tabWorkbench: $("tabWorkbench"),
+  tabMonitor: $("tabMonitor"),
+  tabContentWorkflow: $("tabContentWorkflow"),
+  tabContentWorkbench: $("tabContentWorkbench"),
+  tabContentMonitor: $("tabContentMonitor"),
   
-  btnStart: $("btnStart"),
-  btnRestart: $("btnRestart"),
-  btnRetry: $("btnRetry"),
+  // Workflow
+  workflowProgress: $("workflowProgress"),
   
-  progressFill: $("progressFill"),
-  progressPercent: $("progressPercent"),
-  
+  // Workbench
+  btnRunNow: $("btnRunNow"),
+  btnSchedule: $("btnSchedule"),
+  scheduleCard: $("scheduleCard"),
+  btnCloseSchedule: $("btnCloseSchedule"),
+  scheduleEnabled: $("scheduleEnabled"),
+  scheduleHour: $("scheduleHour"),
+  btnSaveSchedule: $("btnSaveSchedule"),
+  outputCard: $("outputCard"),
   thumbnailImg: $("thumbnailImg"),
   outputTitle: $("outputTitle"),
   outputMeta: $("outputMeta"),
   btnDownloadVideo: $("btnDownloadVideo"),
   btnDownloadThumb: $("btnDownloadThumb"),
-  btnCopyTitle: $("btnCopyTitle"),
   
-  errorMessage: $("errorMessage"),
+  // Monitor
+  statTotal: $("statTotal"),
+  statToday: $("statToday"),
+  statSchedule: $("statSchedule"),
+  statUptime: $("statUptime"),
 };
 
-// Steps in order
+// Pipeline steps
 const STEPS = ["discover", "ingest", "script", "voice", "render", "thumbnail"];
 
-// Current state
-let currentStep = 0;
-let jobResult = null;
+// State
+let schedule = {
+  enabled: true,
+  hour: 6
+};
+let stats = {
+  total: 0,
+  today: 0
+};
+
+// Load from localStorage
+function loadState() {
+  try {
+    const saved = localStorage.getItem("recapFactory");
+    if (saved) {
+      const data = JSON.parse(saved);
+      schedule = data.schedule || schedule;
+      stats = data.stats || stats;
+    }
+  } catch (e) {
+    console.error("Failed to load state:", e);
+  }
+  updateScheduleUI();
+  updateStatsUI();
+}
+
+// Save to localStorage
+function saveState() {
+  try {
+    localStorage.setItem("recapFactory", JSON.stringify({ schedule, stats }));
+  } catch (e) {
+    console.error("Failed to save state:", e);
+  }
+}
 
 // API helper
 async function api(method, path, body) {
@@ -59,97 +102,119 @@ async function api(method, path, body) {
   return data;
 }
 
-// Show/hide sections
-function showSection(name) {
-  els.startSection.classList.add("hidden");
-  els.progressSection.classList.add("hidden");
-  els.completeSection.classList.add("hidden");
-  els.errorSection.classList.add("hidden");
+// Tab switching
+function switchTab(tabName) {
+  // Update tab buttons
+  document.querySelectorAll(".nav-tab").forEach(tab => {
+    tab.classList.remove("active");
+  });
+  $(`tab${tabName.charAt(0).toUpperCase() + tabName.slice(1)}`)?.classList.add("active");
   
-  if (name === "start") els.startSection.classList.remove("hidden");
-  if (name === "progress") els.progressSection.classList.remove("hidden");
-  if (name === "complete") els.completeSection.classList.remove("hidden");
-  if (name === "error") els.errorSection.classList.remove("hidden");
+  // Update tab content
+  document.querySelectorAll(".tab-content").forEach(content => {
+    content.classList.remove("active");
+  });
+  $(`tabContent${tabName.charAt(0).toUpperCase() + tabName.slice(1)}`)?.classList.add("active");
 }
 
 // Update status badge
 function setStatus(kind, text) {
-  els.statusText.textContent = text;
-  els.statusDot.className = "status__dot";
-  if (kind === "working") els.statusDot.classList.add("working");
-  if (kind === "error") els.statusDot.classList.add("error");
-}
-
-// Update step status
-function setStepStatus(stepName, status) {
-  const stepEl = $(`step-${stepName}`);
-  const statusEl = $(`status-${stepName}`);
-  
-  if (!stepEl || !statusEl) return;
-  
-  stepEl.classList.remove("active", "done");
-  statusEl.className = "step__status";
-  
-  if (status === "active") {
-    stepEl.classList.add("active");
-    statusEl.classList.add("working");
-  } else if (status === "done") {
-    stepEl.classList.add("done");
-    statusEl.classList.add("done");
-  } else if (status === "error") {
-    statusEl.classList.add("error");
+  if (els.statusText) els.statusText.textContent = text;
+  if (els.statusDot) {
+    els.statusDot.className = "status-dot";
+    if (kind === "working") els.statusDot.classList.add("working");
+    if (kind === "error") els.statusDot.classList.add("error");
   }
 }
 
-// Update progress bar
-function setProgress(percent) {
-  els.progressFill.style.width = `${percent}%`;
-  els.progressPercent.textContent = `${Math.round(percent)}%`;
+// Update node status in workflow view
+function setNodeStatus(stepName, status) {
+  const node = $(`node-${stepName}`);
+  if (!node) return;
+  
+  node.classList.remove("active", "done");
+  if (status === "active") node.classList.add("active");
+  if (status === "done") node.classList.add("done");
 }
 
-// Reset all steps
-function resetSteps() {
+// Reset all nodes
+function resetNodes() {
   STEPS.forEach(step => {
-    const stepEl = $(`step-${step}`);
-    const statusEl = $(`status-${step}`);
-    if (stepEl) stepEl.classList.remove("active", "done");
-    if (statusEl) statusEl.className = "step__status";
+    const node = $(`node-${step}`);
+    if (node) node.classList.remove("active", "done");
   });
-  setProgress(0);
+  $("node-complete")?.classList.remove("active");
+  if (els.workflowProgress) els.workflowProgress.style.width = "0%";
+}
+
+// Update workflow progress
+function setWorkflowProgress(percent) {
+  if (els.workflowProgress) {
+    els.workflowProgress.style.width = `${percent}%`;
+  }
+}
+
+// Update schedule UI
+function updateScheduleUI() {
+  if (els.scheduleEnabled) els.scheduleEnabled.checked = schedule.enabled;
+  if (els.scheduleHour) els.scheduleHour.value = schedule.hour;
+  
+  // Update trigger node
+  const triggerNode = $("node-trigger");
+  if (triggerNode) {
+    const sub = triggerNode.querySelector(".node__sub");
+    if (sub) {
+      const hour = schedule.hour;
+      const ampm = hour >= 12 ? "PM" : "AM";
+      const displayHour = hour % 12 || 12;
+      sub.textContent = schedule.enabled ? `Daily ${displayHour}${ampm}` : "Disabled";
+    }
+  }
+  
+  // Update monitor stat
+  if (els.statSchedule) {
+    const hour = schedule.hour;
+    const ampm = hour >= 12 ? "PM" : "AM";
+    const displayHour = hour % 12 || 12;
+    els.statSchedule.textContent = schedule.enabled ? `${displayHour} ${ampm}` : "Off";
+  }
+}
+
+// Update stats UI
+function updateStatsUI() {
+  if (els.statTotal) els.statTotal.textContent = stats.total;
+  if (els.statToday) els.statToday.textContent = stats.today;
 }
 
 // Poll job status
 async function pollJobStatus(jobId) {
-  const maxAttempts = 300; // 5 minutes max
+  const maxAttempts = 300;
   let attempts = 0;
   
   while (attempts < maxAttempts) {
     try {
       const status = await api("GET", `/api/job/${jobId}`);
       
-      // Update current step
       if (status.job && status.job.current_step) {
         const stepName = status.job.current_step.replace("step_", "");
         const stepIndex = STEPS.indexOf(stepName);
         
         // Mark previous steps as done
         for (let i = 0; i < stepIndex; i++) {
-          setStepStatus(STEPS[i], "done");
+          setNodeStatus(STEPS[i], "done");
         }
         
         // Mark current step as active
         if (stepIndex >= 0) {
-          setStepStatus(stepName, "active");
-          setProgress(((stepIndex + 0.5) / STEPS.length) * 100);
+          setNodeStatus(stepName, "active");
+          setWorkflowProgress(((stepIndex + 0.5) / STEPS.length) * 100);
         }
       }
       
-      // Check if done
       if (status.job && status.job.status === "completed") {
         return status;
       }
       
-      // Check if failed
       if (status.job && status.job.status === "failed") {
         throw new Error(status.job.error || "Pipeline failed");
       }
@@ -169,108 +234,136 @@ async function pollJobStatus(jobId) {
   throw new Error("Timeout waiting for job to complete");
 }
 
-// Start the automation
-async function startAutomation() {
-  showSection("progress");
-  setStatus("working", "Working...");
-  resetSteps();
-  currentStep = 0;
+// Run automation
+async function runAutomation() {
+  switchTab("workflow");
+  setStatus("working", "Running...");
+  resetNodes();
   
   try {
-    // Start the full pipeline (auto-select video)
-    setStepStatus("discover", "active");
+    setNodeStatus("discover", "active");
     const startResult = await api("POST", "/api/pipeline/full", { auto_select: true });
     
     if (!startResult.job || !startResult.job.id) {
       throw new Error("Failed to start pipeline");
     }
     
-    // Poll for completion
     const result = await pollJobStatus(startResult.job.id);
     
     // Mark all steps as done
-    STEPS.forEach(step => setStepStatus(step, "done"));
-    setProgress(100);
+    STEPS.forEach(step => setNodeStatus(step, "done"));
+    $("node-complete")?.classList.add("active");
+    setWorkflowProgress(100);
     
-    // Show completion
-    jobResult = result;
-    showComplete(result);
+    // Update stats
+    stats.total++;
+    stats.today++;
+    updateStatsUI();
+    saveState();
+    
+    // Show output
+    showOutput(result);
+    setStatus("ready", "Complete");
     
   } catch (e) {
     console.error("Automation error:", e);
-    showError(e.message || "Something went wrong");
+    setStatus("error", "Error");
+    alert("Automation failed: " + (e.message || "Unknown error"));
   }
 }
 
-// Show completion screen
-function showComplete(result) {
-  setStatus("ready", "Complete");
-  showSection("complete");
+// Show output card
+function showOutput(result) {
+  if (!els.outputCard) return;
   
-  // Try to populate output info
+  els.outputCard.classList.remove("hidden");
+  
   if (result && result.job && result.job.result) {
     const r = result.job.result;
     
-    if (r.thumbnail_path) {
+    if (r.thumbnail_path && els.thumbnailImg) {
       els.thumbnailImg.src = `/outputs/${r.video_id}/thumbnail.png`;
     }
     
-    if (r.title) {
-      els.outputTitle.textContent = r.title;
-    } else {
-      els.outputTitle.textContent = "Your Amharic Recap";
+    if (els.outputTitle) {
+      els.outputTitle.textContent = r.title || "Your Amharic Recap";
     }
     
     if (r.video_id) {
-      els.outputMeta.textContent = `Video ID: ${r.video_id}`;
-      els.btnDownloadVideo.href = `/outputs/${r.video_id}/final.mp4`;
-      els.btnDownloadThumb.href = `/outputs/${r.video_id}/thumbnail.png`;
+      if (els.outputMeta) els.outputMeta.textContent = `Video ID: ${r.video_id}`;
+      if (els.btnDownloadVideo) els.btnDownloadVideo.href = `/outputs/${r.video_id}/final.mp4`;
+      if (els.btnDownloadThumb) els.btnDownloadThumb.href = `/outputs/${r.video_id}/thumbnail.png`;
     }
   }
-}
-
-// Show error screen
-function showError(message) {
-  setStatus("error", "Error");
-  showSection("error");
-  els.errorMessage.textContent = message;
-}
-
-// Reset to start
-function resetToStart() {
-  showSection("start");
-  setStatus("ready", "Ready");
-  resetSteps();
-  jobResult = null;
-}
-
-// Copy title to clipboard
-async function copyTitle() {
-  const title = els.outputTitle.textContent;
-  try {
-    await navigator.clipboard.writeText(title);
-    els.btnCopyTitle.textContent = "Copied!";
-    setTimeout(() => {
-      els.btnCopyTitle.textContent = "Copy Title";
-    }, 2000);
-  } catch {
-    alert("Failed to copy. Title: " + title);
-  }
-}
-
-// Wire up events
-function init() {
-  els.btnStart?.addEventListener("click", startAutomation);
-  els.btnRestart?.addEventListener("click", resetToStart);
-  els.btnRetry?.addEventListener("click", startAutomation);
-  els.btnCopyTitle?.addEventListener("click", copyTitle);
   
-  // Check health on load
+  // Switch to workbench to show output
+  switchTab("workbench");
+}
+
+// Schedule functions
+function openSchedule() {
+  if (els.scheduleCard) els.scheduleCard.classList.remove("hidden");
+}
+
+function closeSchedule() {
+  if (els.scheduleCard) els.scheduleCard.classList.add("hidden");
+}
+
+function saveSchedule() {
+  schedule.enabled = els.scheduleEnabled?.checked ?? true;
+  schedule.hour = parseInt(els.scheduleHour?.value ?? "6", 10);
+  saveState();
+  updateScheduleUI();
+  closeSchedule();
+}
+
+// Initialize
+function init() {
+  loadState();
+  
+  // Tab switching
+  els.tabWorkflow?.addEventListener("click", () => switchTab("workflow"));
+  els.tabWorkbench?.addEventListener("click", () => switchTab("workbench"));
+  els.tabMonitor?.addEventListener("click", () => switchTab("monitor"));
+  
+  // Run button
+  els.btnRunNow?.addEventListener("click", runAutomation);
+  
+  // Schedule
+  els.btnSchedule?.addEventListener("click", openSchedule);
+  els.btnCloseSchedule?.addEventListener("click", closeSchedule);
+  els.btnSaveSchedule?.addEventListener("click", saveSchedule);
+  
+  // Check health
   api("GET", "/health").then(() => {
     setStatus("ready", "Ready");
   }).catch(() => {
     setStatus("error", "Offline");
   });
+  
+  // Check for scheduled run
+  checkScheduledRun();
+  setInterval(checkScheduledRun, 60000); // Check every minute
+}
+
+// Check if we should run based on schedule
+function checkScheduledRun() {
+  if (!schedule.enabled) return;
+  
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+  
+  // Run if it's the scheduled hour and within the first minute
+  if (currentHour === schedule.hour && currentMinute === 0) {
+    const lastRun = localStorage.getItem("lastScheduledRun");
+    const today = now.toDateString();
+    
+    if (lastRun !== today) {
+      localStorage.setItem("lastScheduledRun", today);
+      runAutomation();
+    }
+  }
 }
 
 init();

@@ -4,145 +4,262 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Amharic Recap Factory</title>
-    <link rel="stylesheet" href="/ui/styles.css" />
-    <script defer src="/ui/app.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="app.js"></script>
   </head>
   <body>
-    <div class="bg">
-      <div class="bg__glow bg__glow--a"></div>
-      <div class="bg__glow bg__glow--b"></div>
-    </div>
-
-    <main class="container">
-      <!-- Header -->
-      <header class="header">
-        <div class="logo">
-          <div class="logo__icon"></div>
-          <div class="logo__text">Amharic Recap Factory</div>
+    <!-- Header -->
+    <header class="topbar">
+      <div class="topbar__left">
+        <div class="logo-mark"></div>
+        <span class="logo-text">RECAP FACTORY</span>
+      </div>
+      <nav class="topbar__nav">
+        <button class="nav-tab active" data-tab="workflow" id="tabWorkflow">Workflow</button>
+        <button class="nav-tab" data-tab="workbench" id="tabWorkbench">Workbench</button>
+        <button class="nav-tab" data-tab="monitor" id="tabMonitor">Monitor</button>
+      </nav>
+      <div class="topbar__right">
+        <div class="status-pill" id="statusPill">
+          <span class="status-dot" id="statusDot"></span>
+          <span class="status-text" id="statusText">Ready</span>
         </div>
-        <div class="status" id="statusBadge">
-          <span class="status__dot" id="statusDot"></span>
-          <span class="status__text" id="statusText">Ready</span>
-        </div>
-      </header>
+      </div>
+    </header>
 
-      <!-- Main Content - Just the automation view -->
-      <section class="automation">
-        <!-- Big Start Button -->
-        <div class="start-section" id="startSection">
-          <button class="start-btn" id="btnStart" type="button">
-            <span class="start-btn__icon">&#9654;</span>
-            <span class="start-btn__text">Start Automation</span>
-          </button>
-          <p class="start-hint">Press to find a video, translate to Amharic, and create your recap</p>
-        </div>
-
-        <!-- Progress View (hidden by default) -->
-        <div class="progress-section hidden" id="progressSection">
-          <div class="progress-title">Creating Your Recap...</div>
+    <main class="main">
+      <!-- WORKFLOW TAB - Visual Pipeline -->
+      <section class="tab-content active" id="tabContentWorkflow">
+        <div class="workflow-canvas">
+          <div class="workflow-header">
+            <span class="workflow-label">workflow-amharic.flux</span>
+          </div>
           
-          <div class="steps">
-            <div class="step" id="step-discover">
-              <div class="step__icon">&#128269;</div>
-              <div class="step__info">
-                <div class="step__name">Finding Video</div>
-                <div class="step__desc">Searching for the best recap to translate</div>
-              </div>
-              <div class="step__status" id="status-discover"></div>
+          <!-- Visual Node Graph -->
+          <div class="node-graph">
+            <div class="node node--trigger" id="node-trigger">
+              <div class="node__icon">&#9201;</div>
+              <div class="node__label">Schedule</div>
+              <div class="node__sub">Daily 6AM</div>
             </div>
-
-            <div class="step" id="step-ingest">
-              <div class="step__icon">&#128229;</div>
-              <div class="step__info">
-                <div class="step__name">Downloading</div>
-                <div class="step__desc">Getting video and audio</div>
-              </div>
-              <div class="step__status" id="status-ingest"></div>
+            <div class="connector"></div>
+            
+            <div class="node" id="node-discover">
+              <div class="node__icon">&#128269;</div>
+              <div class="node__label">Discover</div>
+              <div class="node__sub">Find Video</div>
             </div>
-
-            <div class="step" id="step-script">
-              <div class="step__icon">&#128221;</div>
-              <div class="step__info">
-                <div class="step__name">Writing Script</div>
-                <div class="step__desc">Creating Amharic narration</div>
-              </div>
-              <div class="step__status" id="status-script"></div>
+            <div class="connector"></div>
+            
+            <div class="node" id="node-ingest">
+              <div class="node__icon">&#128229;</div>
+              <div class="node__label">Ingest</div>
+              <div class="node__sub">Download</div>
             </div>
-
-            <div class="step" id="step-voice">
-              <div class="step__icon">&#127908;</div>
-              <div class="step__info">
-                <div class="step__name">Generating Voice</div>
-                <div class="step__desc">Recording Amharic narration</div>
-              </div>
-              <div class="step__status" id="status-voice"></div>
+            <div class="connector"></div>
+            
+            <div class="node" id="node-script">
+              <div class="node__icon">&#128221;</div>
+              <div class="node__label">Script</div>
+              <div class="node__sub">Translate</div>
             </div>
-
-            <div class="step" id="step-render">
-              <div class="step__icon">&#127916;</div>
-              <div class="step__info">
-                <div class="step__name">Building Video</div>
-                <div class="step__desc">Combining everything together</div>
-              </div>
-              <div class="step__status" id="status-render"></div>
+            <div class="connector"></div>
+            
+            <div class="node" id="node-voice">
+              <div class="node__icon">&#127908;</div>
+              <div class="node__label">Voice</div>
+              <div class="node__sub">Generate</div>
             </div>
-
-            <div class="step" id="step-thumbnail">
-              <div class="step__icon">&#128247;</div>
-              <div class="step__info">
-                <div class="step__name">Creating Thumbnail</div>
-                <div class="step__desc">Making eye-catching cover</div>
-              </div>
-              <div class="step__status" id="status-thumbnail"></div>
+            <div class="connector"></div>
+            
+            <div class="node" id="node-render">
+              <div class="node__icon">&#127916;</div>
+              <div class="node__label">Render</div>
+              <div class="node__sub">Build Video</div>
+            </div>
+            <div class="connector"></div>
+            
+            <div class="node" id="node-thumbnail">
+              <div class="node__icon">&#128247;</div>
+              <div class="node__label">Thumbnail</div>
+              <div class="node__sub">Create</div>
+            </div>
+            <div class="connector"></div>
+            
+            <div class="node node--success" id="node-complete">
+              <div class="node__label">Success</div>
             </div>
           </div>
 
-          <div class="progress-bar">
-            <div class="progress-bar__fill" id="progressFill"></div>
+          <!-- Progress Bar -->
+          <div class="workflow-progress">
+            <div class="workflow-progress__fill" id="workflowProgress"></div>
           </div>
-          <div class="progress-percent" id="progressPercent">0%</div>
         </div>
+      </section>
 
-        <!-- Complete View (hidden by default) -->
-        <div class="complete-section hidden" id="completeSection">
-          <div class="complete-icon">&#10004;</div>
-          <div class="complete-title">Your Recap is Ready!</div>
-          
-          <div class="output-card" id="outputCard">
-            <div class="output-preview" id="outputPreview">
+      <!-- WORKBENCH TAB - Control Interface -->
+      <section class="tab-content" id="tabContentWorkbench">
+        <div class="workbench">
+          <div class="system-card">
+            <div class="system-label">SYSTEM_CORE</div>
+            <div class="system-status">
+              SYSTEM ONLINE // RECAP_ENGINE: ACTIVE // SCHEDULE_MODE: ENABLED // AUTO_PUBLISH: READY
+            </div>
+            <p class="system-desc">
+              I am the <strong>Amharic Recap Factory</strong>. I find trending videos, translate them to Amharic, 
+              generate voice narration, and create ready-to-upload content automatically.
+            </p>
+            
+            <div class="instruction-block">
+              <div class="instruction-label">Automation:</div>
+              <p class="instruction-text">
+                Press <strong>Run Now</strong> to create a recap immediately, or configure the 
+                <strong>schedule</strong> to run automatically every day.
+              </p>
+            </div>
+
+            <div class="action-row">
+              <button class="btn-primary" id="btnRunNow">Run Now</button>
+              <button class="btn-secondary" id="btnSchedule">Configure Schedule</button>
+            </div>
+          </div>
+
+          <!-- Schedule Modal (hidden by default) -->
+          <div class="schedule-card hidden" id="scheduleCard">
+            <div class="schedule-header">
+              <span>Schedule Settings</span>
+              <button class="btn-close" id="btnCloseSchedule">&times;</button>
+            </div>
+            <div class="schedule-body">
+              <div class="schedule-option">
+                <label class="toggle">
+                  <input type="checkbox" id="scheduleEnabled" checked />
+                  <span class="toggle-slider"></span>
+                </label>
+                <span>Enable Daily Automation</span>
+              </div>
+              <div class="schedule-time">
+                <label>Run at:</label>
+                <select id="scheduleHour">
+                  <option value="0">12:00 AM</option>
+                  <option value="1">1:00 AM</option>
+                  <option value="2">2:00 AM</option>
+                  <option value="3">3:00 AM</option>
+                  <option value="4">4:00 AM</option>
+                  <option value="5">5:00 AM</option>
+                  <option value="6" selected>6:00 AM</option>
+                  <option value="7">7:00 AM</option>
+                  <option value="8">8:00 AM</option>
+                  <option value="9">9:00 AM</option>
+                  <option value="10">10:00 AM</option>
+                  <option value="11">11:00 AM</option>
+                  <option value="12">12:00 PM</option>
+                  <option value="13">1:00 PM</option>
+                  <option value="14">2:00 PM</option>
+                  <option value="15">3:00 PM</option>
+                  <option value="16">4:00 PM</option>
+                  <option value="17">5:00 PM</option>
+                  <option value="18">6:00 PM</option>
+                  <option value="19">7:00 PM</option>
+                  <option value="20">8:00 PM</option>
+                  <option value="21">9:00 PM</option>
+                  <option value="22">10:00 PM</option>
+                  <option value="23">11:00 PM</option>
+                </select>
+              </div>
+              <button class="btn-primary" id="btnSaveSchedule">Save Schedule</button>
+            </div>
+          </div>
+
+          <!-- Output Card (shown after completion) -->
+          <div class="output-card hidden" id="outputCard">
+            <div class="output-preview">
               <img id="thumbnailImg" src="" alt="Thumbnail" />
             </div>
             <div class="output-info">
-              <div class="output-title" id="outputTitle">Loading...</div>
+              <div class="output-title" id="outputTitle">Your Recap is Ready</div>
               <div class="output-meta" id="outputMeta"></div>
+              <div class="output-actions">
+                <a class="btn-primary" id="btnDownloadVideo" href="#" download>Download Video</a>
+                <a class="btn-secondary" id="btnDownloadThumb" href="#" download>Download Thumbnail</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MONITOR TAB - Stats & History -->
+      <section class="tab-content" id="tabContentMonitor">
+        <div class="monitor">
+          <!-- Stats Row -->
+          <div class="stats-row">
+            <div class="stat-card">
+              <div class="stat-value" id="statTotal">0</div>
+              <div class="stat-label">TOTAL RECAPS</div>
+              <div class="stat-sub">All Time</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="statToday">0</div>
+              <div class="stat-label">TODAY</div>
+              <div class="stat-sub">Completed</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="statSchedule">6 AM</div>
+              <div class="stat-label">NEXT RUN</div>
+              <div class="stat-sub">Scheduled</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value stat-value--accent" id="statUptime">99.9%</div>
+              <div class="stat-label">UPTIME</div>
             </div>
           </div>
 
-          <div class="output-actions">
-            <a class="action-btn action-btn--primary" id="btnDownloadVideo" href="#" download>
-              Download Video
-            </a>
-            <a class="action-btn" id="btnDownloadThumb" href="#" download>
-              Download Thumbnail
-            </a>
-            <button class="action-btn" id="btnCopyTitle" type="button">
-              Copy Title
-            </button>
+          <!-- Feature Cards -->
+          <div class="feature-row">
+            <div class="feature-card">
+              <div class="feature-icon">&#128302;</div>
+              <div class="feature-title">Visual Flow Designer</div>
+              <div class="feature-desc">View the automation pipeline</div>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">&#128200;</div>
+              <div class="feature-title">Analytics</div>
+              <div class="feature-desc">Track performance metrics</div>
+            </div>
           </div>
 
-          <button class="restart-btn" id="btnRestart" type="button">
-            Create Another Recap
-          </button>
-        </div>
-
-        <!-- Error View (hidden by default) -->
-        <div class="error-section hidden" id="errorSection">
-          <div class="error-icon">&#9888;</div>
-          <div class="error-title">Something went wrong</div>
-          <div class="error-message" id="errorMessage">Unknown error</div>
-          <button class="restart-btn" id="btnRetry" type="button">
-            Try Again
-          </button>
+          <!-- Active Agents -->
+          <div class="agents-section">
+            <div class="agents-header">Active Workforce</div>
+            <div class="agents-grid">
+              <div class="agent-card">
+                <div class="agent-icon">&#128269;</div>
+                <div class="agent-name">DISCOVERY</div>
+                <div class="agent-role">Video Finder</div>
+              </div>
+              <div class="agent-card">
+                <div class="agent-icon">&#128221;</div>
+                <div class="agent-name">TRANSLATOR</div>
+                <div class="agent-role">Amharic Script</div>
+              </div>
+              <div class="agent-card">
+                <div class="agent-icon">&#127908;</div>
+                <div class="agent-name">VOICE_GEN</div>
+                <div class="agent-role">Audio Synthesis</div>
+              </div>
+              <div class="agent-card">
+                <div class="agent-icon">&#127916;</div>
+                <div class="agent-name">RENDERER</div>
+                <div class="agent-role">Video Builder</div>
+              </div>
+              <div class="agent-card">
+                <div class="agent-icon">&#128247;</div>
+                <div class="agent-name">THUMBNAIL</div>
+                <div class="agent-role">Cover Creator</div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
     </main>
