@@ -42,6 +42,12 @@ const els = {
   jobHint: $("jobHint"),
   jobSteps: $("jobSteps"),
   jobEvents: $("jobEvents"),
+
+  artifactMeta: $("artifactMeta"),
+  thumbGrid: $("thumbGrid"),
+  audioEl: $("audioEl"),
+  audioLink: $("audioLink"),
+  audioMeta: $("audioMeta"),
 };
 
 const btns = [
@@ -112,6 +118,75 @@ function sleep(ms) {
 
 function pretty(obj) {
   return JSON.stringify(obj, null, 2);
+}
+
+function firstDefined(...vals) {
+  for (const v of vals) if (v !== undefined && v !== null && v !== "") return v;
+  return undefined;
+}
+
+function normalizeMediaUrl(pathOrUrl) {
+  if (!pathOrUrl) return null;
+  const s = String(pathOrUrl);
+  if (s.startsWith("http://") || s.startsWith("https://") || s.startsWith("/")) return s;
+  const idx = s.indexOf("/app/media/");
+  if (idx >= 0) return "/api/media/" + s.slice(idx + "/app/media/".length);
+  return null;
+}
+
+function clearArtifacts() {
+  if (els.thumbGrid) els.thumbGrid.innerHTML = `<div class="thumbs__empty">Generate thumbnails to see previews here.</div>`;
+  if (els.audioEl) els.audioEl.removeAttribute("src");
+  if (els.audioLink) {
+    els.audioLink.hidden = true;
+    els.audioLink.href = "#";
+  }
+  if (els.audioMeta) els.audioMeta.textContent = "Generate voice to preview audio.";
+  if (els.artifactMeta) els.artifactMeta.textContent = "Waiting for output…";
+}
+
+function renderArtifacts(payload) {
+  if (!payload || typeof payload !== "object") return;
+
+  const images = payload.images || payload.thumbnails;
+  if (els.thumbGrid) {
+    if (Array.isArray(images) && images.length) {
+      els.thumbGrid.innerHTML = "";
+      for (const img of images) {
+        const url = firstDefined(img?.url, normalizeMediaUrl(img?.path));
+        if (!url) continue;
+        const a = document.createElement("a");
+        a.className = "thumb";
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noreferrer";
+        a.innerHTML = `<img alt="thumbnail" src="${escapeHtml(url)}" loading="lazy" />`;
+        els.thumbGrid.appendChild(a);
+      }
+    }
+  }
+
+  const audioUrl = firstDefined(payload.audio_url, normalizeMediaUrl(payload.audio_path), normalizeMediaUrl(payload.audio_file));
+  if (audioUrl && els.audioEl) {
+    els.audioEl.src = audioUrl;
+    if (els.audioLink) {
+      els.audioLink.hidden = false;
+      els.audioLink.href = audioUrl;
+      els.audioLink.textContent = "Open audio";
+    }
+    if (els.audioMeta) {
+      const dur = payload.duration_sec ?? payload.duration;
+      const ms = payload.model_used ? ` • ${payload.model_used}` : "";
+      els.audioMeta.textContent = `Duration: ${dur ? Number(dur).toFixed(1) + "s" : "?"}${ms}`;
+    }
+  }
+
+  if (els.artifactMeta) {
+    const vid = payload.video_id ? `Video: ${payload.video_id}` : "Ready";
+    const model = payload.model_used ? ` • ${payload.model_used}` : "";
+    const st = payload.status ? ` • ${payload.status}` : "";
+    els.artifactMeta.textContent = `${vid}${st}${model}`;
+  }
 }
 
 function escapeHtml(s) {
@@ -400,12 +475,14 @@ async function run(tag, fn) {
   log(tag, "starting…");
   try {
     const out = await fn();
+    renderArtifacts(out);
     els.jsonOut.textContent = pretty(out);
     setStatus("ok", tag + ": OK");
     log(tag, "ok");
     return out;
   } catch (e) {
     const payload = e?.data ? e.data : { error: String(e) };
+    renderArtifacts(payload);
     els.jsonOut.textContent = pretty(payload);
     setStatus("err", tag + ": ERROR");
     log(tag, payload?.detail ? payload.detail : String(e));
@@ -424,6 +501,7 @@ async function refresh() {
 }
 
 function wire() {
+  clearArtifacts();
   els.btnRefresh?.addEventListener("click", refresh);
   els.btnJobsRefresh?.addEventListener("click", () => refreshJobs().catch(() => {}));
 

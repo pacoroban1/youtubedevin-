@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Amharic Recap Autopilot</title>
+    <title>Autopilot Studio</title>
     <link rel="stylesheet" href="/ui/styles.css" />
     <script defer src="/ui/app.js"></script>
   </head>
@@ -12,6 +12,7 @@
       <div class="bg__grid"></div>
       <div class="bg__glow bg__glow--a"></div>
       <div class="bg__glow bg__glow--b"></div>
+      <div class="bg__noise" aria-hidden="true"></div>
     </div>
 
     <header class="topbar">
@@ -21,8 +22,8 @@
           <div class="mark__bar"></div>
         </div>
         <div>
-          <div class="h1">Amharic Recap Autopilot</div>
-          <div class="sub">Run the pipeline, verify engines, and inspect outputs.</div>
+          <div class="h1">Autopilot Studio</div>
+          <div class="sub">Gemini-only script, thumbnails, and voice. No ZThumb. No OpenAI.</div>
         </div>
       </div>
 
@@ -40,7 +41,7 @@
         <div class="panel__hd">
           <div>
             <div class="panel__title">Run</div>
-            <div class="panel__hint">Pick a video ID or auto-select via Discover.</div>
+            <div class="panel__hint">Paste a YouTube ID, or hit Discover.</div>
           </div>
           <div class="panel__actions">
             <button class="btn btn--primary" id="btnFull" type="button">Full Pipeline</button>
@@ -89,7 +90,7 @@
                 <button class="btn btn--ghost" id="btnConfig" type="button">Config</button>
               </div>
               <div class="mini" id="engineNotes">
-                Translation supports <span class="kbd">google</span> or <span class="kbd">libretranslate</span> providers.
+                Engines: <span class="kbd">Gemini</span> only. <span class="kbd">ZThumb</span> disabled.
               </div>
             </div>
           </div>
@@ -99,12 +100,42 @@
       <section class="panel">
         <div class="panel__hd">
           <div>
-            <div class="panel__title">Output</div>
-            <div class="panel__hint">Latest JSON response. Copy it into bug reports.</div>
+            <div class="panel__title">Studio</div>
+            <div class="panel__hint">Thumbnails + audio preview, then raw JSON.</div>
           </div>
           <div class="panel__actions">
             <button class="btn btn--ghost" id="btnCopy" type="button">Copy JSON</button>
             <button class="btn btn--ghost" id="btnClear" type="button">Clear</button>
+          </div>
+        </div>
+
+        <div class="artifacts">
+          <div class="artifacts__hd">
+            <div>
+              <div class="artifacts__title">Artifacts</div>
+              <div class="artifacts__meta" id="artifactMeta">Waiting for output…</div>
+            </div>
+            <div class="artifacts__actions">
+              <a class="btn btn--ghost" id="btnOpenMedia" href="/api/media/" target="_blank" rel="noreferrer">Open Media</a>
+            </div>
+          </div>
+
+          <div class="artifact__grid">
+            <div class="artifact artifact--wide">
+              <div class="artifact__label">Thumbnails</div>
+              <div class="thumbs" id="thumbGrid">
+                <div class="thumbs__empty">Generate thumbnails to see previews here.</div>
+              </div>
+            </div>
+
+            <div class="artifact">
+              <div class="artifact__label">Voice</div>
+              <div class="audio">
+                <audio id="audioEl" controls preload="none"></audio>
+                <a class="link" id="audioLink" href="#" target="_blank" rel="noreferrer" hidden>Open audio</a>
+                <div class="mini" id="audioMeta">Generate voice to preview audio.</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -177,7 +208,7 @@
         <a class="link" href="http://localhost:5678" target="_blank" rel="noreferrer">http://localhost:5678</a>
       </div>
       <div class="foot__right">
-        <span class="muted">UI served by runner</span>
+        <span class="muted">UI served by runner • /ui</span>
       </div>
     </footer>
   </body>

@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -99,6 +100,12 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
 MEDIA_DIR = Path(os.getenv("MEDIA_DIR", "/app/media"))
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/api/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+
+# Mount UI (static)
+UI_DIR = (Path(__file__).parent / "ui").resolve()
+if UI_DIR.exists():
+    # `html=True` allows `/ui/` to serve index.html.
+    app.mount("/ui", StaticFiles(directory=str(UI_DIR), html=True), name="ui")
 
 # Initialize database
 db = Database()
@@ -212,6 +219,13 @@ async def _run_pipeline_full_job(job_id: str, request: FullPipelineRequest) -> N
         job_store.append_event(job_id, f"failed: {e}", level="error")
 
 # --- Endpoints ---
+
+@app.get("/")
+async def root():
+    # Convenience redirect to UI if mounted.
+    if UI_DIR.exists():
+        return RedirectResponse(url="/ui/")
+    return {"status": "ok"}
 
 @app.get("/api/config")
 async def get_config(request: Request):
@@ -333,9 +347,106 @@ async def create_pipeline_full_job(request: FullPipelineRequest):
 
     return {"status": "success", "job": job.to_dict()}
 
+@app.get("/api/jobs")
+async def list_jobs(limit: int = 20, request: Request = None):
+    try:
+        jobs = job_store.list_jobs(limit=limit)
+        return _json(request, 200, {"status": "success", "jobs": [j.to_dict() for j in jobs]})
+    except Exception as e:
+        return _json(request, 502, {"status": "error", "error": "jobs_list_failed", "message": str(e)})
+
 @app.get("/api/jobs/{job_id}")
 async def get_job(job_id: str):
     return {"status": "success", "job": job_store.get_job(job_id).to_dict()}
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, request: Request):
+    task = _job_tasks.get(job_id)
+    if not task:
+        return _json(request, 404, {"status": "error", "error": "job_not_found", "message": f"Job not running: {job_id}"})
+    try:
+        job_store.update_job(job_id, status="cancel_requested")
+        job_store.append_event(job_id, "cancel requested", level="warn")
+        task.cancel()
+        job_store.update_job(job_id, status="canceled", current_step=None)
+        job_store.append_event(job_id, "canceled", level="warn")
+        return _json(request, 200, {"status": "success", "job_id": job_id})
+    except Exception as e:
+        return _json(request, 502, {"status": "error", "error": "cancel_failed", "message": str(e), "job_id": job_id})
+
+@app.post("/api/discover")
+async def discover(request: Request):
+    out = await discovery.discover_top_channels()
+    # discovery may return {"error": "..."} if not configured; keep JSON always.
+    status = "success" if not out.get("error") else "error"
+    return _json(request, 200, {"status": status, **out})
+
+@app.post("/api/ingest/{video_id}")
+async def ingest_video(video_id: str, request: Request):
+    try:
+        out = await ingest.process_video(video_id)
+        return _json(request, 200, {"status": "success", **out})
+    except Exception as e:
+        return _json(request, 502, {"status": "error", "error": "ingest_failed", "message": str(e), "video_id": video_id})
+
+@app.post("/api/render/{video_id}")
+async def render_video(video_id: str, request: Request):
+    try:
+        out = await timing.render_with_alignment(video_id)
+        return _json(request, 200, {"status": "success", **out})
+    except Exception as e:
+        return _json(request, 502, {"status": "error", "error": "render_failed", "message": str(e), "video_id": video_id})
+
+@app.post("/api/upload/{video_id}")
+async def upload_video(video_id: str, request: Request):
+    try:
+        out = await uploader.upload_video(video_id)
+        return _json(request, 200, {"status": "success", **out})
+    except Exception as e:
+        return _json(request, 502, {"status": "error", "error": "upload_failed", "message": str(e), "video_id": video_id})
+
+@app.get("/api/report/daily")
+async def daily_report(request: Request):
+    # Growth loop has no dedicated report method; keep a minimal snapshot for UI.
+    return _json(request, 200, {"status": "success", "message": "not_implemented", "hint": "daily reporting not wired yet"})
+
+@app.get("/api/verify/voice")
+async def verify_voice(request: Request):
+    return _json(
+        request,
+        200,
+        {
+            "status": "success" if gemini.is_configured() else "error",
+            "provider": "gemini",
+            "gemini_configured": gemini.is_configured(),
+            "note": "TTS is Gemini-only; endpoint checks GEMINI_API_KEY presence (no secrets).",
+        },
+    )
+
+@app.get("/api/verify/translate")
+async def verify_translate(request: Request):
+    return _json(
+        request,
+        200,
+        {
+            "status": "success" if gemini.is_configured() else "error",
+            "provider": "gemini",
+            "gemini_configured": gemini.is_configured(),
+            "note": "Translation is Gemini-only in this build.",
+        },
+    )
+
+@app.get("/api/verify/zthumb")
+async def verify_zthumb(request: Request):
+    return _json(
+        request,
+        200,
+        {
+            "status": "success",
+            "available": False,
+            "note": "ZThumb is disabled in this build (Gemini-only).",
+        },
+    )
 
 @app.get("/health")
 async def health():
