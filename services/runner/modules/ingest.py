@@ -27,6 +27,10 @@ class VideoIngest:
         Returns:
             Dict with transcript data and metadata
         """
+        # Ensure a videos row exists so downstream inserts (transcripts/scripts/etc.)
+        # don't fail on FK constraints when the user ingests a video by ID directly.
+        await self._ensure_video_row(video_id)
+
         # Create video directory
         video_dir = os.path.join(self.media_dir, "videos", video_id)
         os.makedirs(video_dir, exist_ok=True)
@@ -57,8 +61,10 @@ class VideoIngest:
         )
         
         # Save to database
-        self.db.save_transcript(video_id, transcript_data)
-        self.db.update_video_status(video_id, "ingested")
+        if not self.db.save_transcript(video_id, transcript_data):
+            raise Exception(f"Failed to save transcript for video {video_id} (DB insert failed)")
+        if not self.db.update_video_status(video_id, "ingested"):
+            raise Exception(f"Failed to update video status for video {video_id} (DB update failed)")
         
         return {
             "video_id": video_id,
@@ -67,6 +73,74 @@ class VideoIngest:
             "language": transcript_data.get("language_detected", "unknown"),
             "transcript_length": len(transcript_data.get("cleaned_transcript", ""))
         }
+
+    def _yt_dlp_video_info(self, video_id: str) -> Dict[str, Any]:
+        """
+        Fetch video metadata via yt-dlp without requiring the YouTube Data API.
+
+        This is intentionally best-effort: if it fails, we still insert a minimal
+        videos row so FK constraints are satisfied.
+        """
+        cmd = [
+            "yt-dlp",
+            "--dump-single-json",
+            "--skip-download",
+            "--no-playlist",
+            f"https://www.youtube.com/watch?v={video_id}",
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if res.returncode != 0:
+                print(f"yt-dlp metadata error: {res.stderr}")
+                return {}
+            return json.loads(res.stdout or "{}") if (res.stdout or "").strip() else {}
+        except Exception as e:
+            print(f"yt-dlp metadata fetch failed: {e}")
+            return {}
+
+    async def _ensure_video_row(self, video_id: str) -> None:
+        """
+        Ensure a row exists in `videos` for this ID.
+
+        Many tables (transcripts/scripts/etc.) have FK constraints to videos(video_id).
+        The discovery flow creates this row, but manual ingest-by-ID should work too.
+        """
+        existing = self.db.get_video(video_id)
+        if existing:
+            return
+
+        info = self._yt_dlp_video_info(video_id)
+        title = (info.get("title") or "").strip() or f"Video {video_id}"
+        description = info.get("description") or ""
+        duration = info.get("duration", None)
+
+        published_at = None
+        try:
+            ts = info.get("timestamp", None)
+            if ts is not None:
+                published_at = datetime.utcfromtimestamp(int(ts))
+        except Exception:
+            published_at = None
+
+        # Keep channel_id NULL here: videos.channel_id references channels(channel_id),
+        # and manual ingest does not require inserting channel rows.
+        ok = self.db.save_video(
+            {
+                "video_id": video_id,
+                "channel_id": None,
+                "title": title,
+                "description": description,
+                "view_count": info.get("view_count", 0) or 0,
+                "like_count": info.get("like_count", 0) or 0,
+                "comment_count": info.get("comment_count", 0) or 0,
+                "duration_seconds": int(duration) if duration is not None else None,
+                "published_at": published_at,
+                "views_velocity": 0,
+                "status": "discovered",
+            }
+        )
+        if not ok:
+            raise Exception(f"Failed to create videos row for {video_id} (DB insert failed)")
     
     async def _download_video(self, video_id: str, output_dir: str) -> Optional[str]:
         """Download video using yt-dlp."""
