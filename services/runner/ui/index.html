@@ -5,242 +5,338 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Autopilot Studio</title>
     <!-- Cache-bust static assets across reloads -->
-    <link rel="stylesheet" href="/ui/styles.css?v=9" />
-    <script defer src="/ui/app.js?v=9"></script>
+    <link rel="stylesheet" href="/ui/styles.css?v=10" />
+    <script defer src="/ui/app.js?v=10"></script>
   </head>
   <body>
-    <div class="bg">
+    <div class="bg" aria-hidden="true">
       <div class="bg__grid"></div>
-      <div class="bg__fabric" aria-hidden="true"></div>
+      <div class="bg__stars"></div>
+      <div class="bg__fabric"></div>
       <div class="bg__glow bg__glow--a"></div>
       <div class="bg__glow bg__glow--b"></div>
-      <div class="bg__noise" aria-hidden="true"></div>
-      <div class="bg__scan" aria-hidden="true"></div>
+      <div class="bg__noise"></div>
+      <div class="bg__scan"></div>
+      <div class="bg__vignette"></div>
     </div>
 
-    <header class="topbar">
-      <div class="topbar__left">
-        <div class="mark" aria-hidden="true">
-          <div class="mark__dot"></div>
-          <div class="mark__bar"></div>
-        </div>
-        <div>
-          <div class="h1">Autopilot Studio</div>
-          <div class="sub">Command your recap pipeline like a control room. <span class="kbd">Cmd</span>/<span class="kbd">Ctrl</span>+<span class="kbd">K</span> for Command Palette.</div>
-        </div>
-      </div>
-
-      <div class="topbar__right">
-        <div class="pill" id="statusPill">
-          <span class="pill__led" id="statusLed"></span>
-          <span class="pill__text" id="statusText">Idle</span>
-        </div>
-        <button class="btn btn--ghost" id="btnRefresh" type="button">Refresh</button>
-      </div>
-    </header>
-
-    <main class="shell">
-      <section class="panel">
-        <div class="panel__hd">
-          <div>
-            <div class="panel__title">Run</div>
-            <div class="panel__hint">Paste a YouTube ID, or hit Discover.</div>
+    <div class="app">
+      <aside class="rail glass">
+        <div class="rail__brand">
+          <div class="mark">
+            <div class="mark__dot"></div>
+            <div class="mark__bar"></div>
           </div>
-          <div class="panel__actions">
-            <button class="btn btn--primary" id="btnFull" type="button">Full Pipeline</button>
+          <div>
+            <div class="rail__title">AUTOPILOT</div>
+            <div class="rail__sub">Recap control room</div>
+          </div>
+        </div>
+
+        <div class="rail__section">
+          <div class="rail__label">Studio</div>
+          <button class="railbtn railbtn--active" id="tabBtnDesigner" type="button" data-tab="designer">Designer</button>
+          <button class="railbtn" id="tabBtnWorkbench" type="button" data-tab="workbench">Workbench</button>
+          <button class="railbtn" id="tabBtnMonitor" type="button" data-tab="monitor">Monitor</button>
+        </div>
+
+        <div class="rail__section">
+          <div class="rail__label">Quick</div>
+          <button class="railbtn railbtn--primary" id="btnFull" type="button">Full Pipeline</button>
+          <button class="railbtn" id="btnDiscover" type="button">Discover</button>
+          <button class="railbtn" id="btnReport" type="button">Daily Report</button>
+          <button class="railbtn" id="btnConfig" type="button">Config</button>
+          <a class="railbtn railbtn--link" id="btnOpenMedia" href="/api/media/" target="_blank" rel="noreferrer">Open Media</a>
+        </div>
+
+        <div class="rail__section">
+          <div class="rail__label">Engines</div>
+          <button class="railbtn" id="btnVerifyVoice" type="button">Verify Voice</button>
+          <button class="railbtn" id="btnVerifyTranslate" type="button">Verify Translate</button>
+          <button class="railbtn" id="btnVerifyZthumb" type="button">Verify ZThumb</button>
+          <div class="rail__note" id="engineNotes">
+            Engines: <span class="kbd">Gemini</span> only. <span class="kbd">ZThumb</span> disabled.
+          </div>
+        </div>
+
+        <div class="rail__foot">
+          <div class="rail__hint"><span class="kbd">Cmd</span>/<span class="kbd">Ctrl</span>+<span class="kbd">K</span> Command Palette</div>
+          <div class="rail__links">
+            <a class="link" href="http://localhost:8000" target="_blank" rel="noreferrer">Runner</a>
+            <span class="sep">|</span>
+            <a class="link" href="http://localhost:5678" target="_blank" rel="noreferrer">n8n</a>
+          </div>
+        </div>
+      </aside>
+
+      <section class="window glass">
+        <header class="window__top">
+          <div class="traffic">
+            <span class="traffic__dot traffic__dot--r"></span>
+            <span class="traffic__dot traffic__dot--y"></span>
+            <span class="traffic__dot traffic__dot--g"></span>
+          </div>
+          <div class="window__center">
+            <div class="window__name">Autopilot Studio</div>
+            <div class="window__meta">OLED black, fabric texture, glass panels, red rim only.</div>
+          </div>
+          <div class="window__right">
+            <div class="pill" id="statusPill">
+              <span class="pill__led" id="statusLed"></span>
+              <span class="pill__text" id="statusText">Idle</span>
+            </div>
+            <button class="btn btn--ghost" id="btnRefresh" type="button">Refresh</button>
             <button class="btn btn--ghost" id="btnCancelJob" type="button" disabled>Cancel Job</button>
           </div>
+        </header>
+
+        <div class="window__tabs" role="tablist" aria-label="Studio Tabs">
+          <button class="wtab wtab--active" id="wtabDesigner" type="button" role="tab" aria-selected="true" data-tab="designer">Designer</button>
+          <button class="wtab" id="wtabWorkbench" type="button" role="tab" aria-selected="false" data-tab="workbench">Workbench</button>
+          <button class="wtab" id="wtabMonitor" type="button" role="tab" aria-selected="false" data-tab="monitor">Monitor</button>
+          <div class="wtab__spacer"></div>
+          <button class="btn btn--ghost btn--mini" id="btnClear" type="button">Clear</button>
+          <button class="btn btn--ghost btn--mini" id="btnCopy" type="button">Copy JSON</button>
         </div>
 
-        <div class="field">
-          <label class="label" for="videoId">Video ID</label>
-          <div class="row">
-            <input class="input" id="videoId" placeholder="e.g. dQw4w9WgXcQ" autocomplete="off" />
-            <button class="btn btn--soft" id="btnIngest" type="button">Ingest</button>
-            <button class="btn btn--soft" id="btnScript" type="button">Script</button>
-            <button class="btn btn--soft" id="btnVoice" type="button">Voice</button>
-            <button class="btn btn--soft" id="btnRender" type="button">Render</button>
-            <button class="btn btn--soft" id="btnThumb" type="button">Thumbnail</button>
-            <button class="btn btn--soft" id="btnUpload" type="button">Upload</button>
-          </div>
-          <div class="help">
-            Tip: the full pipeline will run ingest → script → voice → render → thumbnail → upload → distribute.
+        <div class="window__dock">
+          <div class="dock">
+            <div class="dock__field">
+              <label class="dock__label" for="videoId">Video ID</label>
+              <input class="dock__input" id="videoId" placeholder="Paste YouTube URL or ID (e.g. dQw4w9WgXcQ)" autocomplete="off" />
+              <div class="dock__hint">Tip: Click nodes in Designer, or run steps in Workbench.</div>
+            </div>
+            <div class="dock__actions">
+              <button class="btn btn--primary" id="btnGoWorkbench" type="button">Open Workbench</button>
+            </div>
           </div>
         </div>
 
-        <div class="split">
-          <div class="card">
-            <div class="card__hd">
-              <div class="card__title">Discovery</div>
-              <div class="card__meta">YouTube search + ranking</div>
-            </div>
-            <div class="card__bd">
-              <button class="btn btn--primary" id="btnDiscover" type="button">Discover</button>
-              <button class="btn btn--ghost" id="btnReport" type="button">Daily Report</button>
-            </div>
-          </div>
+        <div class="window__body">
+          <section class="tabpane tabpane--active" id="tabDesigner" data-tabpane="designer">
+            <div class="designer">
+              <div class="designer__canvas" aria-label="Pipeline Designer">
+                <svg class="designer__lines" viewBox="0 0 1000 420" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="dash" x1="0" x2="1">
+                      <stop offset="0%" stop-color="rgba(255,255,255,0.10)"></stop>
+                      <stop offset="50%" stop-color="rgba(255,255,255,0.22)"></stop>
+                      <stop offset="100%" stop-color="rgba(255,255,255,0.10)"></stop>
+                    </linearGradient>
+                  </defs>
+                  <path d="M140 210 C 210 210, 230 210, 280 210" stroke="url(#dash)" stroke-width="2" stroke-dasharray="6 10" fill="none"></path>
+                  <path d="M340 210 C 400 210, 420 210, 460 210" stroke="url(#dash)" stroke-width="2" stroke-dasharray="6 10" fill="none"></path>
 
-          <div class="card">
-            <div class="card__hd">
-              <div class="card__title">Engines</div>
-              <div class="card__meta">Health + capability checks</div>
-            </div>
-            <div class="card__bd card__bd--stack">
-              <div class="row row--wrap">
-                <button class="btn btn--ghost" id="btnVerifyVoice" type="button">Verify Voice</button>
-                <button class="btn btn--ghost" id="btnVerifyTranslate" type="button">Verify Translate</button>
-                <button class="btn btn--ghost" id="btnVerifyZthumb" type="button">Verify ZThumb</button>
-                <button class="btn btn--ghost" id="btnConfig" type="button">Config</button>
+                  <path d="M520 210 C 580 170, 610 150, 640 135" stroke="url(#dash)" stroke-width="2" stroke-dasharray="6 10" fill="none"></path>
+                  <path d="M520 210 C 580 250, 610 270, 640 285" stroke="url(#dash)" stroke-width="2" stroke-dasharray="6 10" fill="none"></path>
+
+                  <path d="M700 135 C 760 135, 790 170, 800 210" stroke="url(#dash)" stroke-width="2" stroke-dasharray="6 10" fill="none"></path>
+                  <path d="M700 285 C 760 285, 790 250, 800 210" stroke="url(#dash)" stroke-width="2" stroke-dasharray="6 10" fill="none"></path>
+
+                  <path d="M840 210 C 860 210, 875 210, 890 210" stroke="url(#dash)" stroke-width="2" stroke-dasharray="6 10" fill="none"></path>
+                  <path d="M930 210 C 940 210, 945 210, 950 210" stroke="url(#dash)" stroke-width="2" stroke-dasharray="6 10" fill="none"></path>
+                </svg>
+
+                <button class="node node--circle" id="node-discover" type="button" data-step="discover" style="--x: 120; --y: 210;">
+                  <div class="node__title">Discover</div>
+                  <div class="node__sub">YouTube scan</div>
+                </button>
+                <button class="node" id="node-ingest" type="button" data-step="ingest" style="--x: 300; --y: 210;">
+                  <div class="node__title">Ingest</div>
+                  <div class="node__sub">Transcript + assets</div>
+                </button>
+                <button class="node node--diamond" id="node-script" type="button" data-step="script" style="--x: 480; --y: 210;">
+                  <div class="node__title">Script</div>
+                  <div class="node__sub">Gemini JSON</div>
+                </button>
+
+                <button class="node" id="node-voice" type="button" data-step="voice" style="--x: 660; --y: 135;">
+                  <div class="node__title">Voice</div>
+                  <div class="node__sub">Gemini TTS</div>
+                </button>
+                <button class="node" id="node-thumbnail" type="button" data-step="thumbnail" style="--x: 660; --y: 285;">
+                  <div class="node__title">Thumbnail</div>
+                  <div class="node__sub">Imagen fallback</div>
+                </button>
+
+                <button class="node node--pill" id="node-render" type="button" data-step="render" style="--x: 820; --y: 210;">
+                  <div class="node__title">Render</div>
+                  <div class="node__sub">Alignment</div>
+                </button>
+                <button class="node" id="node-upload" type="button" data-step="upload" style="--x: 910; --y: 210;">
+                  <div class="node__title">Upload</div>
+                  <div class="node__sub">YouTube API</div>
+                </button>
+                <button class="node node--success" id="node-distribute" type="button" data-step="distribute" style="--x: 960; --y: 210;" disabled>
+                  <div class="node__title">Distribute</div>
+                  <div class="node__sub">Job-only</div>
+                </button>
               </div>
-              <div class="mini" id="engineNotes">
-                Engines: <span class="kbd">Gemini</span> only. <span class="kbd">ZThumb</span> disabled.
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
 
-      <section class="panel">
-        <div class="panel__hd">
-          <div>
-            <div class="panel__title">Studio</div>
-            <div class="panel__hint">Thumbnails + audio preview, then raw JSON.</div>
-          </div>
-          <div class="panel__actions">
-            <button class="btn btn--ghost" id="btnCopy" type="button">Copy JSON</button>
-            <button class="btn btn--ghost" id="btnClear" type="button">Clear</button>
-          </div>
-        </div>
-
-        <div class="artifacts">
-          <div class="artifacts__hd">
-            <div>
-              <div class="artifacts__title">Artifacts</div>
-              <div class="artifacts__meta" id="artifactMeta">Waiting for output…</div>
-            </div>
-            <div class="artifacts__actions">
-              <a class="btn btn--ghost" id="btnOpenMedia" href="/api/media/" target="_blank" rel="noreferrer">Open Media</a>
-            </div>
-          </div>
-
-          <div class="artifact__grid">
-            <div class="artifact artifact--wide">
-              <div class="artifact__row">
-                <div class="artifact__label">Thumbnails</div>
-                <div class="artifact__tools">
-                  <button class="btn btn--ghost btn--mini" id="btnSafe" type="button">Safe Area</button>
-                  <button class="btn btn--ghost btn--mini" id="btnDownloadThumb" type="button" disabled>Download</button>
+              <div class="designer__dock">
+                <div>
+                  <div class="dock__title">Designer</div>
+                  <div class="dock__meta">This view is inspired by your automation screenshots. Click a node to run it.</div>
                 </div>
-              </div>
-              <div class="thumbhero" id="thumbHero" hidden>
-                <img class="thumbhero__img" id="thumbHeroImg" alt="selected thumbnail" />
-                <div class="thumbhero__guides" aria-hidden="true"></div>
-                <div class="thumbhero__meta" id="thumbHeroMeta"></div>
-              </div>
-              <div class="thumbs" id="thumbGrid">
-                <div class="thumbs__empty">Generate thumbnails to see previews here.</div>
-              </div>
-            </div>
-
-            <div class="artifactcol">
-              <div class="artifact">
-                <div class="artifact__label">Voice</div>
-                <div class="audio">
-                  <canvas class="wave" id="waveCanvas" height="64"></canvas>
-                  <audio id="audioEl" controls preload="none"></audio>
-                  <a class="link" id="audioLink" href="#" target="_blank" rel="noreferrer" hidden>Open audio</a>
-                  <div class="mini" id="audioMeta">Generate voice to preview audio.</div>
-                </div>
-              </div>
-
-              <div class="artifact">
-                <div class="artifact__label">Script</div>
-                <div class="scriptbox">
-                  <div class="scriptbox__hook" id="scriptHook">Generate script to preview the hook here.</div>
-                  <div class="scriptbox__row">
-                    <button class="btn btn--ghost btn--mini" id="btnCopyHook" type="button">Copy Hook</button>
-                    <div class="mini" id="scriptMeta">Waiting…</div>
-                  </div>
+                <div class="designer__dockright">
+                  <button class="btn btn--ghost" id="btnGoMonitor" type="button">Open Monitor</button>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+          </section>
 
-        <div class="jobs">
-          <div class="jobs__hd">
-            <div>
-              <div class="jobs__title">Jobs</div>
-              <div class="jobs__meta">Recent async runs. Click a job to inspect.</div>
-            </div>
-            <div class="jobs__actions">
-              <button class="btn btn--ghost" id="btnJobsRefresh" type="button">Refresh Jobs</button>
-            </div>
-          </div>
-
-          <div class="jobs__grid">
-            <div class="jobs__list" id="jobsList">
-              <div class="jobs__empty">No jobs yet.</div>
-            </div>
-            <div class="jobs__detail" id="jobDetail">
-              <div class="jobdetail__empty" id="jobDetailEmpty">No job selected.</div>
-
-              <div class="jobdetail" id="jobDetailBody" hidden>
-                <div class="jobdetail__hd">
+          <section class="tabpane" id="tabWorkbench" data-tabpane="workbench">
+            <div class="wb">
+              <section class="panel wb__run">
+                <div class="panel__hd">
                   <div>
-                    <div class="jobdetail__title" id="jobTitle">Job</div>
-                    <div class="jobdetail__meta" id="jobMeta"></div>
+                    <div class="panel__title">Workbench</div>
+                    <div class="panel__hint">Run steps and preview artifacts. JSON and job history live in Monitor.</div>
+                  </div>
+                  <div class="panel__actions">
+                    <button class="btn btn--soft" id="btnIngest" type="button">Ingest</button>
+                    <button class="btn btn--soft" id="btnScript" type="button">Script</button>
+                    <button class="btn btn--soft" id="btnVoice" type="button">Voice</button>
+                    <button class="btn btn--soft" id="btnRender" type="button">Render</button>
+                    <button class="btn btn--soft" id="btnThumb" type="button">Thumbnail</button>
+                    <button class="btn btn--soft" id="btnUpload" type="button">Upload</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <div class="help">
+                    Tip: Full Pipeline runs ingest -&gt; script -&gt; voice -&gt; render -&gt; thumbnail -&gt; upload -&gt; distribute.
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel wb__studio">
+                <div class="panel__hd">
+                  <div>
+                    <div class="panel__title">Studio</div>
+                    <div class="panel__hint">Thumbnails + audio preview.</div>
                   </div>
                 </div>
 
-                <div class="bar">
-                  <div class="bar__fill" id="jobBar"></div>
-                </div>
-                <div class="bar__meta">
-                  <span class="bar__pct" id="jobPct">0%</span>
-                  <span class="bar__hint" id="jobHint"></span>
-                </div>
-
-                <div class="viz" id="pipelineViz"></div>
-
-                <div class="steps" id="jobSteps"></div>
-
-                <div class="events">
-                  <div class="events__hd">
-                    <div class="events__title">Events</div>
-                    <div class="events__meta">Most recent first</div>
+                <div class="artifacts">
+                  <div class="artifacts__hd">
+                    <div>
+                      <div class="artifacts__title">Artifacts</div>
+                      <div class="artifacts__meta" id="artifactMeta">Waiting for output...</div>
+                    </div>
                   </div>
-                  <div class="events__bd" id="jobEvents"></div>
+
+                  <div class="artifact__grid">
+                    <div class="artifact artifact--wide">
+                      <div class="artifact__row">
+                        <div class="artifact__label">Thumbnails</div>
+                        <div class="artifact__tools">
+                          <button class="btn btn--ghost btn--mini" id="btnSafe" type="button">Safe Area</button>
+                          <button class="btn btn--ghost btn--mini" id="btnDownloadThumb" type="button" disabled>Download</button>
+                        </div>
+                      </div>
+                      <div class="thumbhero" id="thumbHero" hidden>
+                        <img class="thumbhero__img" id="thumbHeroImg" alt="selected thumbnail" />
+                        <div class="thumbhero__guides"></div>
+                        <div class="thumbhero__meta" id="thumbHeroMeta"></div>
+                      </div>
+                      <div class="thumbs" id="thumbGrid">
+                        <div class="thumbs__empty">Generate thumbnails to see previews here.</div>
+                      </div>
+                    </div>
+
+                    <div class="artifactcol">
+                      <div class="artifact">
+                        <div class="artifact__label">Voice</div>
+                        <div class="audio">
+                          <canvas class="wave" id="waveCanvas" height="64"></canvas>
+                          <audio id="audioEl" controls preload="none"></audio>
+                          <a class="link" id="audioLink" href="#" target="_blank" rel="noreferrer" hidden>Open audio</a>
+                          <div class="mini" id="audioMeta">Generate voice to preview audio.</div>
+                        </div>
+                      </div>
+
+                      <div class="artifact">
+                        <div class="artifact__label">Script</div>
+                        <div class="scriptbox">
+                          <div class="scriptbox__hook" id="scriptHook">Generate script to preview the hook here.</div>
+                          <div class="scriptbox__row">
+                            <button class="btn btn--ghost btn--mini" id="btnCopyHook" type="button">Copy Hook</button>
+                            <div class="mini" id="scriptMeta">Waiting...</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="tabpane" id="tabMonitor" data-tabpane="monitor">
+            <section class="panel">
+              <div class="panel__hd">
+                <div>
+                  <div class="panel__title">Monitor</div>
+                  <div class="panel__hint">Jobs, JSON, and the UI activity log.</div>
+                </div>
+                <div class="panel__actions">
+                  <button class="btn btn--ghost" id="btnJobsRefresh" type="button">Refresh Jobs</button>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
 
-        <pre class="json" id="jsonOut">{}</pre>
+              <div class="jobs">
+                <div class="jobs__grid">
+                  <div class="jobs__list" id="jobsList">
+                    <div class="jobs__empty">No jobs yet.</div>
+                  </div>
+                  <div class="jobs__detail" id="jobDetail">
+                    <div class="jobdetail__empty" id="jobDetailEmpty">No job selected.</div>
 
-        <div class="logs">
-          <div class="logs__hd">
-            <div class="logs__title">Activity</div>
-            <div class="logs__meta">Local UI log (not container logs)</div>
-          </div>
-          <div class="logs__bd" id="logOut"></div>
+                    <div class="jobdetail" id="jobDetailBody" hidden>
+                      <div class="jobdetail__hd">
+                        <div>
+                          <div class="jobdetail__title" id="jobTitle">Job</div>
+                          <div class="jobdetail__meta" id="jobMeta"></div>
+                        </div>
+                      </div>
+
+                      <div class="bar">
+                        <div class="bar__fill" id="jobBar"></div>
+                      </div>
+                      <div class="bar__meta">
+                        <span class="bar__pct" id="jobPct">0%</span>
+                        <span class="bar__hint" id="jobHint"></span>
+                      </div>
+
+                      <div class="viz" id="pipelineViz"></div>
+                      <div class="steps" id="jobSteps"></div>
+
+                      <div class="events">
+                        <div class="events__hd">
+                          <div class="events__title">Events</div>
+                          <div class="events__meta">Most recent first</div>
+                        </div>
+                        <div class="events__bd" id="jobEvents"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <pre class="json" id="jsonOut">{}</pre>
+
+              <div class="logs">
+                <div class="logs__hd">
+                  <div class="logs__title">Activity</div>
+                  <div class="logs__meta">Local UI log (not container logs)</div>
+                </div>
+                <div class="logs__bd" id="logOut"></div>
+              </div>
+            </section>
+          </section>
         </div>
       </section>
-    </main>
-
-    <footer class="foot">
-      <div class="foot__left">
-        <span class="muted">Runner:</span>
-        <a class="link" href="http://localhost:8000" target="_blank" rel="noreferrer">http://localhost:8000</a>
-        <span class="sep">•</span>
-        <span class="muted">n8n:</span>
-        <a class="link" href="http://localhost:5678" target="_blank" rel="noreferrer">http://localhost:5678</a>
-      </div>
-      <div class="foot__right">
-        <span class="muted">UI served by runner • /ui</span>
-      </div>
-    </footer>
+    </div>
 
     <!-- Command palette -->
     <div class="cmdk" id="cmdk" hidden>
@@ -250,9 +346,10 @@
           <div class="cmdk__title">Command Palette</div>
           <div class="cmdk__hint">Type to filter. <span class="kbd">Esc</span> to close.</div>
         </div>
-        <input class="cmdk__input" id="cmdkInput" placeholder="Search commands…" autocomplete="off" />
+        <input class="cmdk__input" id="cmdkInput" placeholder="Search commands..." autocomplete="off" />
         <div class="cmdk__list" id="cmdkList"></div>
       </div>
     </div>
   </body>
 </html>
+

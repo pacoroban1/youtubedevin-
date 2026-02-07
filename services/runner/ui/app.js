@@ -67,7 +67,23 @@ const els = {
   cmdkList: $("cmdkList"),
 
   pipelineViz: $("pipelineViz"),
+
+  // Tabs / navigation (new layout).
+  tabBtnDesigner: $("tabBtnDesigner"),
+  tabBtnWorkbench: $("tabBtnWorkbench"),
+  tabBtnMonitor: $("tabBtnMonitor"),
+  wtabDesigner: $("wtabDesigner"),
+  wtabWorkbench: $("wtabWorkbench"),
+  wtabMonitor: $("wtabMonitor"),
+  tabDesigner: $("tabDesigner"),
+  tabWorkbench: $("tabWorkbench"),
+  tabMonitor: $("tabMonitor"),
+  btnGoWorkbench: $("btnGoWorkbench"),
+  btnGoMonitor: $("btnGoMonitor"),
 };
+
+const TABS = ["designer", "workbench", "monitor"];
+let activeTab = "designer";
 
 const btns = [
   els.btnRefresh,
@@ -108,6 +124,47 @@ let lastHookText = "";
 let safeAreaOn = false;
 let waveformUrl = null;
 
+function setTab(name, opts = {}) {
+  const { silent = false } = opts;
+  const tab = TABS.includes(name) ? name : "designer";
+  activeTab = tab;
+
+  // Panes
+  for (const el of document.querySelectorAll("[data-tabpane]")) {
+    el.classList.toggle("tabpane--active", el.getAttribute("data-tabpane") === tab);
+  }
+
+  // Rail active
+  for (const b of document.querySelectorAll(".railbtn[data-tab]")) {
+    b.classList.toggle("railbtn--active", b.getAttribute("data-tab") === tab);
+  }
+
+  // Top tabs active
+  for (const b of document.querySelectorAll(".wtab[data-tab]")) {
+    const on = b.getAttribute("data-tab") === tab;
+    b.classList.toggle("wtab--active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  }
+
+  try {
+    localStorage.setItem("autopilot_active_tab", tab);
+  } catch {
+    // ignore
+  }
+
+  if (!silent) log("ui", `tab: ${tab}`);
+}
+
+function loadInitialTab() {
+  try {
+    const v = localStorage.getItem("autopilot_active_tab");
+    if (v && TABS.includes(v)) return v;
+  } catch {
+    // ignore
+  }
+  return "designer";
+}
+
 function ts() {
   const d = new Date();
   return d.toLocaleTimeString([], { hour12: false });
@@ -134,6 +191,8 @@ function setStatus(kind, text) {
 
 function setBusy(busy) {
   for (const b of btns) b.disabled = !!busy;
+  // Prevent multi-click storms on the Designer nodes.
+  document.body.classList.toggle("is-busy", !!busy);
 }
 
 function sleep(ms) {
@@ -142,6 +201,11 @@ function sleep(ms) {
 
 function pretty(obj) {
   return JSON.stringify(obj, null, 2);
+}
+
+function stepKeyForTag(tag) {
+  if (tag === "script_full") return "script";
+  return tag;
 }
 
 function firstDefined(...vals) {
@@ -515,6 +579,31 @@ function vizClassForStatus(st) {
   return "";
 }
 
+function nodeClassForStatus(st) {
+  const s = String(st || "").toLowerCase();
+  if (s === "ok") return "node--ok";
+  if (s === "error") return "node--error";
+  if (s === "skipped") return "node--skipped";
+  if (s === "running") return "node--running";
+  return "";
+}
+
+function setDesignerNodeStatus(step, status) {
+  const el = document.getElementById(`node-${step}`);
+  if (!el) return;
+  el.classList.remove("node--ok", "node--error", "node--running", "node--skipped");
+  const cls = nodeClassForStatus(status);
+  if (cls) el.classList.add(cls);
+}
+
+function renderDesignerFromJob(job) {
+  const steps = job?.steps || {};
+  for (const name of PIPELINE_STEPS) {
+    const st = (steps?.[name]?.status || "").toLowerCase();
+    setDesignerNodeStatus(name, st);
+  }
+}
+
 function statusKindForJob(job) {
   const st = (job?.status || "").toLowerCase();
   if (st === "succeeded") return "ok";
@@ -578,6 +667,7 @@ function renderJobDetail(job) {
     els.jobDetailBody.hidden = true;
     currentJobStatus = null;
     setPipelineRunning(false);
+    renderDesignerFromJob(null);
     return;
   }
 
@@ -614,6 +704,8 @@ function renderJobDetail(job) {
       els.pipelineViz.appendChild(cell);
     }
   }
+
+  renderDesignerFromJob(job);
 
   // Steps
   if (els.jobSteps) {
@@ -682,6 +774,7 @@ async function selectJob(jobId, opts = {}) {
   const { pollIfRunning = false, silent = false } = opts;
   if (!jobId) return;
   currentJobId = jobId;
+  setTab("monitor", { silent: true });
   if (!silent) {
     setStatus("working", `job: ${shortId(jobId)}`);
     log("job", `loading: ${jobId}`);
@@ -737,15 +830,23 @@ async function pollJob(jobId) {
 }
 
 async function run(tag, fn) {
+  // Most actions produce artifacts; keep user in Workbench.
+  if (["ingest", "script", "script_full", "voice", "render", "thumbnail", "upload"].includes(tag)) {
+    setTab("workbench", { silent: true });
+  }
   setBusy(true);
   setStatus("working", tag);
   log(tag, "starting…");
+  // Reflect the action on the designer graph immediately.
+  const stepKey = stepKeyForTag(tag);
+  if (PIPELINE_STEPS.includes(stepKey)) setDesignerNodeStatus(stepKey, "running");
   try {
     const out = await fn();
     renderArtifacts(out);
     els.jsonOut.textContent = pretty(out);
     setStatus("ok", tag + ": OK");
     log(tag, "ok");
+    if (PIPELINE_STEPS.includes(stepKey)) setDesignerNodeStatus(stepKey, "ok");
     return out;
   } catch (e) {
     const payload = e?.data ? e.data : { error: String(e) };
@@ -753,6 +854,7 @@ async function run(tag, fn) {
     els.jsonOut.textContent = pretty(payload);
     setStatus("err", tag + ": ERROR");
     log(tag, payload?.detail ? payload.detail : String(e));
+    if (PIPELINE_STEPS.includes(stepKey)) setDesignerNodeStatus(stepKey, "error");
   } finally {
     setBusy(false);
   }
@@ -773,6 +875,34 @@ async function refresh() {
 }
 
 function wire() {
+  // Tabs (rail + top tabs).
+  const initial = loadInitialTab();
+  setTab(initial, { silent: true });
+  for (const b of document.querySelectorAll("[data-tab]")) {
+    const tab = b.getAttribute("data-tab");
+    if (!tab) continue;
+    b.addEventListener("click", () => setTab(tab));
+  }
+  els.btnGoWorkbench?.addEventListener("click", () => setTab("workbench"));
+  els.btnGoMonitor?.addEventListener("click", () => setTab("monitor"));
+
+  // Designer node clicks.
+  for (const node of document.querySelectorAll(".node[data-step]")) {
+    const step = node.getAttribute("data-step");
+    if (!step) continue;
+    node.addEventListener("click", () => {
+      if (node.disabled) return;
+      if (step === "discover") return run("discover", () => api("POST", "/api/discover", {}));
+      if (step === "ingest") return run("ingest", () => api("POST", `/api/ingest/${encodeURIComponent(getVideoIdRequired())}`));
+      if (step === "script") return run("script_full", () => api("POST", `/api/script/full/${encodeURIComponent(getVideoIdRequired())}`));
+      if (step === "voice") return run("voice", () => api("POST", `/api/voice/${encodeURIComponent(getVideoIdRequired())}`));
+      if (step === "thumbnail") return run("thumbnail", () => api("POST", `/api/thumbnail/${encodeURIComponent(getVideoIdRequired())}`));
+      if (step === "render") return run("render", () => api("POST", `/api/render/${encodeURIComponent(getVideoIdRequired())}`));
+      if (step === "upload") return run("upload", () => api("POST", `/api/upload/${encodeURIComponent(getVideoIdRequired())}`));
+      // "distribute" is job-only; node is disabled.
+    });
+  }
+
   clearArtifacts();
   els.btnRefresh?.addEventListener("click", refresh);
   els.btnJobsRefresh?.addEventListener("click", () => refreshJobs().catch(() => {}));
@@ -910,6 +1040,7 @@ function wire() {
   );
 
   els.btnFull?.addEventListener("click", async () => {
+    setTab("monitor", { silent: true });
     const jobs = await refreshJobs();
     const active = jobs.find((j) => ["queued", "running", "cancel_requested"].includes(String(j.status || "").toLowerCase()));
     if (active) {
