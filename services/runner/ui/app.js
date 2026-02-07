@@ -123,11 +123,12 @@ function log(tag, msg) {
 function setStatus(kind, text) {
   els.statusText.textContent = text;
   const led = els.statusLed;
-  let bg = "rgba(246,246,249,0.20)";
-  if (kind === "working") bg = "rgba(34,211,238,0.95)";
-  if (kind === "ok") bg = "rgba(163,255,18,0.95)";
-  if (kind === "warn") bg = "rgba(251,191,36,0.95)";
-  if (kind === "err") bg = "rgba(251,113,133,0.95)";
+  // Muted signal colors to match the graphite theme.
+  let bg = "rgba(245,245,247,0.18)";
+  if (kind === "working") bg = "rgba(245,245,247,0.72)";
+  if (kind === "ok") bg = "rgba(34,197,94,0.85)";
+  if (kind === "warn") bg = "rgba(245,158,11,0.85)";
+  if (kind === "err") bg = "rgba(248,113,113,0.85)";
   led.style.background = bg;
 }
 
