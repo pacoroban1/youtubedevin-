@@ -209,21 +209,39 @@ def get_available_models() -> List[dict]:
 def select_backend(vram_mb: int, requested_variant: VariantType, available_models: List[dict]) -> str:
     """Select best backend based on VRAM and availability."""
     available_variants = {m["variant"] for m in available_models if m["available"]}
+    allow_remote = os.getenv("ZTHUMB_ALLOW_REMOTE_DOWNLOAD", "false").strip().lower() in ("1", "true", "yes", "on")
     
-    if requested_variant != VariantType.AUTO and requested_variant.value in available_variants:
+    # If the caller explicitly requests a variant, honor it even if the model
+    # isn't present locally. Backends can fall back to downloading from HF.
+    if requested_variant != VariantType.AUTO:
         return requested_variant.value
     
-    # Auto selection based on VRAM
+    # Prefer locally available variants when present.
     if vram_mb >= 12000 and "full" in available_variants:
         return "full"
-    elif vram_mb >= 8000 and "turbo" in available_variants:
+    if vram_mb >= 8000 and "turbo" in available_variants:
         return "turbo"
-    elif "gguf" in available_variants:
+    if "gguf" in available_variants:
         return "gguf"
-    elif "turbo" in available_variants:
+    if "turbo" in available_variants:
         return "turbo"
-    
-    return "placeholder"
+
+    # No local models found.
+    # By default we *do not* auto-download multi-GB models. Enable explicitly.
+    if not allow_remote:
+        return "placeholder"
+
+    # If remote downloads are allowed, choose a reasonable default based on VRAM
+    # and let the backend download the base model from HuggingFace on first run.
+    if vram_mb >= 12000:
+        return "full"
+    if vram_mb >= 8000:
+        return "turbo"
+    # On CPU (common on Mac dev machines), prefer the smaller Turbo model to
+    # avoid multi-GB SDXL base downloads.
+    if vram_mb == 0:
+        return "turbo"
+    return "gguf"
 
 
 def check_safety(prompt: str, negative_prompt: str) -> List[str]:

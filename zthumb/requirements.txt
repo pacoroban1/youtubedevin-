@@ -12,6 +12,8 @@ diffusers==0.27.0
 transformers==4.38.0
 accelerate==0.27.0
 safetensors==0.4.2
+# diffusers==0.27.0 imports `cached_download`, which was removed in newer hub releases.
+huggingface-hub==0.20.3
 torch>=2.1.0
 compel==2.0.2
 

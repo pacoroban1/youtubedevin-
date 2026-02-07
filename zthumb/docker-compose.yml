@@ -14,18 +14,17 @@ services:
     environment:
       - ZTHUMB_MODELS_DIR=/models
       - ZTHUMB_OUTPUTS_DIR=/outputs
+      - HF_HOME=/models/hf
+      # CPU-friendly default; override to "stabilityai/sdxl-turbo" on Linux GPU if desired.
+      - ZTHUMB_TURBO_MODEL_ID=${ZTHUMB_TURBO_MODEL_ID:-stabilityai/sd-turbo}
+      # Disable auto-downloading multi-GB models by default. Enable explicitly on
+      # your Linux machine when you actually want inference.
+      - ZTHUMB_ALLOW_REMOTE_DOWNLOAD=${ZTHUMB_ALLOW_REMOTE_DOWNLOAD:-false}
       - ZTHUMB_SAFE_MODE=${ZTHUMB_SAFE_MODE:-true}
       - Z_LORA_PATH=${Z_LORA_PATH:-}
       - Z_LORA_SCALE=${Z_LORA_SCALE:-}
       - ZTHUMB_LORA_PATH=${ZTHUMB_LORA_PATH:-}
       - ZTHUMB_LORA_SCALE=${ZTHUMB_LORA_SCALE:-}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8100/health"]

@@ -1,5 +1,10 @@
 # Z-Image Thumbnail Engine Dockerfile
-FROM nvidia/cuda:12.1-runtime-ubuntu22.04
+#
+# NOTE: This image must run on CPU-only + Apple Silicon (linux/arm64) as well as
+# GPU Linux boxes. We default to a multi-arch Python base image; GPU users can
+# override BASE_IMAGE at build time.
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE}
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -7,10 +12,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-venv \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
@@ -19,7 +21,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Create virtual environment
-RUN python3 -m venv /opt/venv
+RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install Python dependencies
@@ -47,4 +49,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8100/health || exit 1
 
 # Run the server
-CMD ["python3", "-m", "uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8100"]
+CMD ["python", "-m", "uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8100"]

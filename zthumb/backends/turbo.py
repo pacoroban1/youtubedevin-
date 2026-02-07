@@ -2,6 +2,7 @@
 SDXL-Turbo Backend - Fast draft generation (1-4 steps)
 """
 
+import os
 import asyncio
 from pathlib import Path
 from typing import List
@@ -29,6 +30,10 @@ class TurboBackend(BaseBackend):
         try:
             import torch
             from diffusers import AutoPipelineForText2Image
+
+            # Allow overriding the HF model ID. This is important for CPU-only
+            # environments where SDXL variants can be extremely large.
+            model_id = os.getenv("ZTHUMB_TURBO_MODEL_ID", "stabilityai/sdxl-turbo").strip() or "stabilityai/sdxl-turbo"
             
             device = "cuda" if torch.cuda.is_available() else "cpu"
             dtype = torch.float16 if device == "cuda" else torch.float32
@@ -43,7 +48,7 @@ class TurboBackend(BaseBackend):
             else:
                 # Load from HuggingFace
                 self.pipe = AutoPipelineForText2Image.from_pretrained(
-                    "stabilityai/sdxl-turbo",
+                    model_id,
                     torch_dtype=dtype,
                     variant="fp16" if device == "cuda" else None
                 )
