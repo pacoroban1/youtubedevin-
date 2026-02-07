@@ -1,102 +1,48 @@
-/* UI for the runner service (no build step). */
+/* Simple Automation UI - One Button, Show Progress */
 
 const $ = (id) => document.getElementById(id);
 
+// Elements
 const els = {
-  statusPill: $("statusPill"),
-  statusLed: $("statusLed"),
+  statusDot: $("statusDot"),
   statusText: $("statusText"),
-  jsonOut: $("jsonOut"),
-  logOut: $("logOut"),
-  videoId: $("videoId"),
-
-  btnRefresh: $("btnRefresh"),
-  btnCopy: $("btnCopy"),
-  btnClear: $("btnClear"),
-
-  btnDiscover: $("btnDiscover"),
-  btnReport: $("btnReport"),
-  btnFull: $("btnFull"),
-
-  btnIngest: $("btnIngest"),
-  btnScript: $("btnScript"),
-  btnVoice: $("btnVoice"),
-  btnRender: $("btnRender"),
-  btnThumb: $("btnThumb"),
-  btnUpload: $("btnUpload"),
-
-  btnVerifyVoice: $("btnVerifyVoice"),
-  btnVerifyTranslate: $("btnVerifyTranslate"),
-  btnVerifyZthumb: $("btnVerifyZthumb"),
-  btnConfig: $("btnConfig"),
+  
+  startSection: $("startSection"),
+  progressSection: $("progressSection"),
+  completeSection: $("completeSection"),
+  errorSection: $("errorSection"),
+  
+  btnStart: $("btnStart"),
+  btnRestart: $("btnRestart"),
+  btnRetry: $("btnRetry"),
+  
+  progressFill: $("progressFill"),
+  progressPercent: $("progressPercent"),
+  
+  thumbnailImg: $("thumbnailImg"),
+  outputTitle: $("outputTitle"),
+  outputMeta: $("outputMeta"),
+  btnDownloadVideo: $("btnDownloadVideo"),
+  btnDownloadThumb: $("btnDownloadThumb"),
+  btnCopyTitle: $("btnCopyTitle"),
+  
+  errorMessage: $("errorMessage"),
 };
 
-const btns = [
-  els.btnRefresh,
-  els.btnCopy,
-  els.btnClear,
-  els.btnDiscover,
-  els.btnReport,
-  els.btnFull,
-  els.btnIngest,
-  els.btnScript,
-  els.btnVoice,
-  els.btnRender,
-  els.btnThumb,
-  els.btnUpload,
-  els.btnVerifyVoice,
-  els.btnVerifyTranslate,
-  els.btnVerifyZthumb,
-  els.btnConfig,
-].filter(Boolean);
+// Steps in order
+const STEPS = ["discover", "ingest", "script", "voice", "render", "thumbnail"];
 
-function ts() {
-  const d = new Date();
-  return d.toLocaleTimeString([], { hour12: false });
-}
+// Current state
+let currentStep = 0;
+let jobResult = null;
 
-function log(tag, msg) {
-  const line = document.createElement("div");
-  line.className = "logline";
-  line.innerHTML = `<div class="time">${ts()}</div><div class="tag">${escapeHtml(tag)}</div><div class="msg">${escapeHtml(msg)}</div>`;
-  els.logOut.prepend(line);
-}
-
-function setStatus(kind, text) {
-  els.statusText.textContent = text;
-  const led = els.statusLed;
-  let bg = "rgba(20,19,26,0.20)";
-  if (kind === "working") bg = "rgba(14,165,164,0.95)";
-  if (kind === "ok") bg = "rgba(18,185,129,0.95)";
-  if (kind === "warn") bg = "rgba(249,115,22,0.95)";
-  if (kind === "err") bg = "rgba(239,68,68,0.95)";
-  led.style.background = bg;
-}
-
-function setBusy(busy) {
-  for (const b of btns) b.disabled = !!busy;
-}
-
-function pretty(obj) {
-  return JSON.stringify(obj, null, 2);
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
+// API helper
 async function api(method, path, body) {
   const opts = { method, headers: {} };
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }
-
   const res = await fetch(path, opts);
   const text = await res.text();
   let data;
@@ -113,113 +59,219 @@ async function api(method, path, body) {
   return data;
 }
 
-function getVideoIdRequired() {
-  const v = (els.videoId.value || "").trim();
-  if (!v) throw new Error("Missing video ID");
-  return v;
+// Show/hide sections
+function showSection(name) {
+  els.startSection.classList.add("hidden");
+  els.progressSection.classList.add("hidden");
+  els.completeSection.classList.add("hidden");
+  els.errorSection.classList.add("hidden");
+  
+  if (name === "start") els.startSection.classList.remove("hidden");
+  if (name === "progress") els.progressSection.classList.remove("hidden");
+  if (name === "complete") els.completeSection.classList.remove("hidden");
+  if (name === "error") els.errorSection.classList.remove("hidden");
 }
 
-async function run(tag, fn) {
-  setBusy(true);
-  setStatus("working", tag);
-  log(tag, "starting…");
-  try {
-    const out = await fn();
-    els.jsonOut.textContent = pretty(out);
-    setStatus("ok", tag + ": OK");
-    log(tag, "ok");
-    return out;
-  } catch (e) {
-    const payload = e?.data ? e.data : { error: String(e) };
-    els.jsonOut.textContent = pretty(payload);
-    setStatus("err", tag + ": ERROR");
-    log(tag, payload?.detail ? payload.detail : String(e));
-  } finally {
-    setBusy(false);
+// Update status badge
+function setStatus(kind, text) {
+  els.statusText.textContent = text;
+  els.statusDot.className = "status__dot";
+  if (kind === "working") els.statusDot.classList.add("working");
+  if (kind === "error") els.statusDot.classList.add("error");
+}
+
+// Update step status
+function setStepStatus(stepName, status) {
+  const stepEl = $(`step-${stepName}`);
+  const statusEl = $(`status-${stepName}`);
+  
+  if (!stepEl || !statusEl) return;
+  
+  stepEl.classList.remove("active", "done");
+  statusEl.className = "step__status";
+  
+  if (status === "active") {
+    stepEl.classList.add("active");
+    statusEl.classList.add("working");
+  } else if (status === "done") {
+    stepEl.classList.add("done");
+    statusEl.classList.add("done");
+  } else if (status === "error") {
+    statusEl.classList.add("error");
   }
 }
 
-async function refresh() {
-  await run("refresh", async () => {
-    const health = await api("GET", "/health");
-    const cfg = await api("GET", "/api/config");
-    return { health, config: cfg };
-  });
+// Update progress bar
+function setProgress(percent) {
+  els.progressFill.style.width = `${percent}%`;
+  els.progressPercent.textContent = `${Math.round(percent)}%`;
 }
 
-function wire() {
-  els.btnRefresh?.addEventListener("click", refresh);
-
-  els.btnClear?.addEventListener("click", () => {
-    els.jsonOut.textContent = "{}";
-    setStatus("idle", "Idle");
-    log("ui", "cleared output");
+// Reset all steps
+function resetSteps() {
+  STEPS.forEach(step => {
+    const stepEl = $(`step-${step}`);
+    const statusEl = $(`status-${step}`);
+    if (stepEl) stepEl.classList.remove("active", "done");
+    if (statusEl) statusEl.className = "step__status";
   });
+  setProgress(0);
+}
 
-  els.btnCopy?.addEventListener("click", async () => {
-    const txt = els.jsonOut.textContent || "{}";
+// Poll job status
+async function pollJobStatus(jobId) {
+  const maxAttempts = 300; // 5 minutes max
+  let attempts = 0;
+  
+  while (attempts < maxAttempts) {
     try {
-      await navigator.clipboard.writeText(txt);
-      log("ui", "copied JSON");
-      setStatus("ok", "Copied");
-      setTimeout(() => setStatus("idle", "Idle"), 700);
-    } catch {
-      log("ui", "clipboard copy failed (browser permissions)");
-      setStatus("warn", "Copy failed");
-      setTimeout(() => setStatus("idle", "Idle"), 900);
+      const status = await api("GET", `/api/job/${jobId}`);
+      
+      // Update current step
+      if (status.job && status.job.current_step) {
+        const stepName = status.job.current_step.replace("step_", "");
+        const stepIndex = STEPS.indexOf(stepName);
+        
+        // Mark previous steps as done
+        for (let i = 0; i < stepIndex; i++) {
+          setStepStatus(STEPS[i], "done");
+        }
+        
+        // Mark current step as active
+        if (stepIndex >= 0) {
+          setStepStatus(stepName, "active");
+          setProgress(((stepIndex + 0.5) / STEPS.length) * 100);
+        }
+      }
+      
+      // Check if done
+      if (status.job && status.job.status === "completed") {
+        return status;
+      }
+      
+      // Check if failed
+      if (status.job && status.job.status === "failed") {
+        throw new Error(status.job.error || "Pipeline failed");
+      }
+      
+    } catch (e) {
+      if (e.message !== "Pipeline failed") {
+        console.error("Poll error:", e);
+      } else {
+        throw e;
+      }
     }
-  });
-
-  els.btnDiscover?.addEventListener("click", () =>
-    run("discover", () => api("POST", "/api/discover", {}))
-  );
-
-  els.btnReport?.addEventListener("click", () =>
-    run("report", () => api("GET", "/api/report/daily"))
-  );
-
-  els.btnIngest?.addEventListener("click", () =>
-    run("ingest", () => api("POST", `/api/ingest/${encodeURIComponent(getVideoIdRequired())}`))
-  );
-  els.btnScript?.addEventListener("click", () =>
-    run("script", () => api("POST", `/api/script/${encodeURIComponent(getVideoIdRequired())}`))
-  );
-  els.btnVoice?.addEventListener("click", () =>
-    run("voice", () => api("POST", `/api/voice/${encodeURIComponent(getVideoIdRequired())}`))
-  );
-  els.btnRender?.addEventListener("click", () =>
-    run("render", () => api("POST", `/api/render/${encodeURIComponent(getVideoIdRequired())}`))
-  );
-  els.btnThumb?.addEventListener("click", () =>
-    run("thumbnail", () => api("POST", `/api/thumbnail/${encodeURIComponent(getVideoIdRequired())}`))
-  );
-  els.btnUpload?.addEventListener("click", () =>
-    run("upload", () => api("POST", `/api/upload/${encodeURIComponent(getVideoIdRequired())}`))
-  );
-
-  els.btnFull?.addEventListener("click", () =>
-    run("pipeline", async () => {
-      const v = (els.videoId.value || "").trim();
-      const body = v ? { video_id: v, auto_select: false } : { auto_select: true };
-      return api("POST", "/api/pipeline/full", body);
-    })
-  );
-
-  els.btnVerifyVoice?.addEventListener("click", () =>
-    run("verify_voice", () => api("GET", "/api/verify/voice"))
-  );
-  els.btnVerifyTranslate?.addEventListener("click", () =>
-    run("verify_translate", () => api("GET", "/api/verify/translate"))
-  );
-  els.btnVerifyZthumb?.addEventListener("click", () =>
-    run("verify_zthumb", () => api("GET", "/api/verify/zthumb"))
-  );
-  els.btnConfig?.addEventListener("click", () =>
-    run("config", () => api("GET", "/api/config"))
-  );
+    
+    await new Promise(r => setTimeout(r, 1000));
+    attempts++;
+  }
+  
+  throw new Error("Timeout waiting for job to complete");
 }
 
-setStatus("idle", "Idle");
-wire();
-refresh().catch(() => {});
+// Start the automation
+async function startAutomation() {
+  showSection("progress");
+  setStatus("working", "Working...");
+  resetSteps();
+  currentStep = 0;
+  
+  try {
+    // Start the full pipeline (auto-select video)
+    setStepStatus("discover", "active");
+    const startResult = await api("POST", "/api/pipeline/full", { auto_select: true });
+    
+    if (!startResult.job || !startResult.job.id) {
+      throw new Error("Failed to start pipeline");
+    }
+    
+    // Poll for completion
+    const result = await pollJobStatus(startResult.job.id);
+    
+    // Mark all steps as done
+    STEPS.forEach(step => setStepStatus(step, "done"));
+    setProgress(100);
+    
+    // Show completion
+    jobResult = result;
+    showComplete(result);
+    
+  } catch (e) {
+    console.error("Automation error:", e);
+    showError(e.message || "Something went wrong");
+  }
+}
+
+// Show completion screen
+function showComplete(result) {
+  setStatus("ready", "Complete");
+  showSection("complete");
+  
+  // Try to populate output info
+  if (result && result.job && result.job.result) {
+    const r = result.job.result;
+    
+    if (r.thumbnail_path) {
+      els.thumbnailImg.src = `/outputs/${r.video_id}/thumbnail.png`;
+    }
+    
+    if (r.title) {
+      els.outputTitle.textContent = r.title;
+    } else {
+      els.outputTitle.textContent = "Your Amharic Recap";
+    }
+    
+    if (r.video_id) {
+      els.outputMeta.textContent = `Video ID: ${r.video_id}`;
+      els.btnDownloadVideo.href = `/outputs/${r.video_id}/final.mp4`;
+      els.btnDownloadThumb.href = `/outputs/${r.video_id}/thumbnail.png`;
+    }
+  }
+}
+
+// Show error screen
+function showError(message) {
+  setStatus("error", "Error");
+  showSection("error");
+  els.errorMessage.textContent = message;
+}
+
+// Reset to start
+function resetToStart() {
+  showSection("start");
+  setStatus("ready", "Ready");
+  resetSteps();
+  jobResult = null;
+}
+
+// Copy title to clipboard
+async function copyTitle() {
+  const title = els.outputTitle.textContent;
+  try {
+    await navigator.clipboard.writeText(title);
+    els.btnCopyTitle.textContent = "Copied!";
+    setTimeout(() => {
+      els.btnCopyTitle.textContent = "Copy Title";
+    }, 2000);
+  } catch {
+    alert("Failed to copy. Title: " + title);
+  }
+}
+
+// Wire up events
+function init() {
+  els.btnStart?.addEventListener("click", startAutomation);
+  els.btnRestart?.addEventListener("click", resetToStart);
+  els.btnRetry?.addEventListener("click", startAutomation);
+  els.btnCopyTitle?.addEventListener("click", copyTitle);
+  
+  // Check health on load
+  api("GET", "/health").then(() => {
+    setStatus("ready", "Ready");
+  }).catch(() => {
+    setStatus("error", "Offline");
+  });
+}
+
+init();
 

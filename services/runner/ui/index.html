@@ -3,134 +3,149 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Amharic Recap Autopilot</title>
+    <title>Amharic Recap Factory</title>
     <link rel="stylesheet" href="/ui/styles.css" />
     <script defer src="/ui/app.js"></script>
   </head>
   <body>
     <div class="bg">
-      <div class="bg__grid"></div>
       <div class="bg__glow bg__glow--a"></div>
       <div class="bg__glow bg__glow--b"></div>
     </div>
 
-    <header class="topbar">
-      <div class="topbar__left">
-        <div class="mark" aria-hidden="true">
-          <div class="mark__dot"></div>
-          <div class="mark__bar"></div>
+    <main class="container">
+      <!-- Header -->
+      <header class="header">
+        <div class="logo">
+          <div class="logo__icon"></div>
+          <div class="logo__text">Amharic Recap Factory</div>
         </div>
-        <div>
-          <div class="h1">Amharic Recap Autopilot</div>
-          <div class="sub">Run the pipeline, verify engines, and inspect outputs.</div>
+        <div class="status" id="statusBadge">
+          <span class="status__dot" id="statusDot"></span>
+          <span class="status__text" id="statusText">Ready</span>
         </div>
-      </div>
+      </header>
 
-      <div class="topbar__right">
-        <div class="pill" id="statusPill">
-          <span class="pill__led" id="statusLed"></span>
-          <span class="pill__text" id="statusText">Idle</span>
-        </div>
-        <button class="btn btn--ghost" id="btnRefresh" type="button">Refresh</button>
-      </div>
-    </header>
-
-    <main class="shell">
-      <section class="panel">
-        <div class="panel__hd">
-          <div>
-            <div class="panel__title">Run</div>
-            <div class="panel__hint">Pick a video ID or auto-select via Discover.</div>
-          </div>
-          <div class="panel__actions">
-            <button class="btn btn--primary" id="btnFull" type="button">Full Pipeline</button>
-          </div>
+      <!-- Main Content - Just the automation view -->
+      <section class="automation">
+        <!-- Big Start Button -->
+        <div class="start-section" id="startSection">
+          <button class="start-btn" id="btnStart" type="button">
+            <span class="start-btn__icon">&#9654;</span>
+            <span class="start-btn__text">Start Automation</span>
+          </button>
+          <p class="start-hint">Press to find a video, translate to Amharic, and create your recap</p>
         </div>
 
-        <div class="field">
-          <label class="label" for="videoId">Video ID</label>
-          <div class="row">
-            <input class="input" id="videoId" placeholder="e.g. dQw4w9WgXcQ" autocomplete="off" />
-            <button class="btn btn--soft" id="btnIngest" type="button">Ingest</button>
-            <button class="btn btn--soft" id="btnScript" type="button">Script</button>
-            <button class="btn btn--soft" id="btnVoice" type="button">Voice</button>
-            <button class="btn btn--soft" id="btnRender" type="button">Render</button>
-            <button class="btn btn--soft" id="btnThumb" type="button">Thumbnail</button>
-            <button class="btn btn--soft" id="btnUpload" type="button">Upload</button>
-          </div>
-          <div class="help">
-            Tip: the full pipeline will run ingest → script → voice → render → thumbnail → upload → distribute.
-          </div>
-        </div>
-
-        <div class="split">
-          <div class="card">
-            <div class="card__hd">
-              <div class="card__title">Discovery</div>
-              <div class="card__meta">YouTube search + ranking</div>
-            </div>
-            <div class="card__bd">
-              <button class="btn btn--primary" id="btnDiscover" type="button">Discover</button>
-              <button class="btn btn--ghost" id="btnReport" type="button">Daily Report</button>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card__hd">
-              <div class="card__title">Engines</div>
-              <div class="card__meta">Health + capability checks</div>
-            </div>
-            <div class="card__bd card__bd--stack">
-              <div class="row row--wrap">
-                <button class="btn btn--ghost" id="btnVerifyVoice" type="button">Verify Voice</button>
-                <button class="btn btn--ghost" id="btnVerifyTranslate" type="button">Verify Translate</button>
-                <button class="btn btn--ghost" id="btnVerifyZthumb" type="button">Verify ZThumb</button>
-                <button class="btn btn--ghost" id="btnConfig" type="button">Config</button>
+        <!-- Progress View (hidden by default) -->
+        <div class="progress-section hidden" id="progressSection">
+          <div class="progress-title">Creating Your Recap...</div>
+          
+          <div class="steps">
+            <div class="step" id="step-discover">
+              <div class="step__icon">&#128269;</div>
+              <div class="step__info">
+                <div class="step__name">Finding Video</div>
+                <div class="step__desc">Searching for the best recap to translate</div>
               </div>
-              <div class="mini" id="engineNotes">
-                Translation supports <span class="kbd">google</span> or <span class="kbd">libretranslate</span> providers.
+              <div class="step__status" id="status-discover"></div>
+            </div>
+
+            <div class="step" id="step-ingest">
+              <div class="step__icon">&#128229;</div>
+              <div class="step__info">
+                <div class="step__name">Downloading</div>
+                <div class="step__desc">Getting video and audio</div>
               </div>
+              <div class="step__status" id="status-ingest"></div>
+            </div>
+
+            <div class="step" id="step-script">
+              <div class="step__icon">&#128221;</div>
+              <div class="step__info">
+                <div class="step__name">Writing Script</div>
+                <div class="step__desc">Creating Amharic narration</div>
+              </div>
+              <div class="step__status" id="status-script"></div>
+            </div>
+
+            <div class="step" id="step-voice">
+              <div class="step__icon">&#127908;</div>
+              <div class="step__info">
+                <div class="step__name">Generating Voice</div>
+                <div class="step__desc">Recording Amharic narration</div>
+              </div>
+              <div class="step__status" id="status-voice"></div>
+            </div>
+
+            <div class="step" id="step-render">
+              <div class="step__icon">&#127916;</div>
+              <div class="step__info">
+                <div class="step__name">Building Video</div>
+                <div class="step__desc">Combining everything together</div>
+              </div>
+              <div class="step__status" id="status-render"></div>
+            </div>
+
+            <div class="step" id="step-thumbnail">
+              <div class="step__icon">&#128247;</div>
+              <div class="step__info">
+                <div class="step__name">Creating Thumbnail</div>
+                <div class="step__desc">Making eye-catching cover</div>
+              </div>
+              <div class="step__status" id="status-thumbnail"></div>
             </div>
           </div>
-        </div>
-      </section>
 
-      <section class="panel">
-        <div class="panel__hd">
-          <div>
-            <div class="panel__title">Output</div>
-            <div class="panel__hint">Latest JSON response. Copy it into bug reports.</div>
+          <div class="progress-bar">
+            <div class="progress-bar__fill" id="progressFill"></div>
           </div>
-          <div class="panel__actions">
-            <button class="btn btn--ghost" id="btnCopy" type="button">Copy JSON</button>
-            <button class="btn btn--ghost" id="btnClear" type="button">Clear</button>
-          </div>
+          <div class="progress-percent" id="progressPercent">0%</div>
         </div>
 
-        <pre class="json" id="jsonOut">{}</pre>
-
-        <div class="logs">
-          <div class="logs__hd">
-            <div class="logs__title">Activity</div>
-            <div class="logs__meta">Local UI log (not container logs)</div>
+        <!-- Complete View (hidden by default) -->
+        <div class="complete-section hidden" id="completeSection">
+          <div class="complete-icon">&#10004;</div>
+          <div class="complete-title">Your Recap is Ready!</div>
+          
+          <div class="output-card" id="outputCard">
+            <div class="output-preview" id="outputPreview">
+              <img id="thumbnailImg" src="" alt="Thumbnail" />
+            </div>
+            <div class="output-info">
+              <div class="output-title" id="outputTitle">Loading...</div>
+              <div class="output-meta" id="outputMeta"></div>
+            </div>
           </div>
-          <div class="logs__bd" id="logOut"></div>
+
+          <div class="output-actions">
+            <a class="action-btn action-btn--primary" id="btnDownloadVideo" href="#" download>
+              Download Video
+            </a>
+            <a class="action-btn" id="btnDownloadThumb" href="#" download>
+              Download Thumbnail
+            </a>
+            <button class="action-btn" id="btnCopyTitle" type="button">
+              Copy Title
+            </button>
+          </div>
+
+          <button class="restart-btn" id="btnRestart" type="button">
+            Create Another Recap
+          </button>
+        </div>
+
+        <!-- Error View (hidden by default) -->
+        <div class="error-section hidden" id="errorSection">
+          <div class="error-icon">&#9888;</div>
+          <div class="error-title">Something went wrong</div>
+          <div class="error-message" id="errorMessage">Unknown error</div>
+          <button class="restart-btn" id="btnRetry" type="button">
+            Try Again
+          </button>
         </div>
       </section>
     </main>
-
-    <footer class="foot">
-      <div class="foot__left">
-        <span class="muted">Runner:</span>
-        <a class="link" href="http://localhost:8000" target="_blank" rel="noreferrer">http://localhost:8000</a>
-        <span class="sep">•</span>
-        <span class="muted">n8n:</span>
-        <a class="link" href="http://localhost:5678" target="_blank" rel="noreferrer">http://localhost:5678</a>
-      </div>
-      <div class="foot__right">
-        <span class="muted">UI served by runner</span>
-      </div>
-    </footer>
   </body>
 </html>
 
