@@ -4,9 +4,13 @@ Main FastAPI application that orchestrates the video recap pipeline.
 """
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List
 import os
+from pathlib import Path
+import httpx
+from urllib.parse import urlparse
 
 from modules.discovery import ChannelDiscovery
 from modules.ingest import VideoIngest
@@ -17,12 +21,18 @@ from modules.thumbnail import ThumbnailGenerator
 from modules.upload import YouTubeUploader
 from modules.growth import GrowthLoop
 from modules.database import Database
+from modules.translate import GoogleTranslateV2, LibreTranslate
 
 app = FastAPI(
     title="Amharic Recap Autopilot",
     description="End-to-end YouTube automation for Amharic recap videos",
     version="1.0.0"
 )
+
+# Mount UI (static) if present
+UI_DIR = Path(__file__).resolve().parent / "ui"
+if UI_DIR.exists():
+    app.mount("/ui", StaticFiles(directory=str(UI_DIR), html=True), name="ui")
 
 # Initialize database
 db = Database()
@@ -36,6 +46,8 @@ timing = TimingMatcher(db)
 thumbnail_gen = ThumbnailGenerator(db)
 uploader = YouTubeUploader(db)
 growth = GrowthLoop(db)
+translate_google = GoogleTranslateV2()
+translate_libre = LibreTranslate()
 
 
 class DiscoveryRequest(BaseModel):
@@ -126,6 +138,169 @@ async def verify_voice_support():
         "status": "success",
         "verification": verification_results,
         "conclusion": "Azure TTS supports Amharic (am-ET) with neural voices. ElevenLabs does NOT support Amharic."
+    }
+
+
+@app.get("/api/verify/translate")
+async def verify_translate_support():
+    """
+    TRANSLATION VERIFICATION (OPTIONAL)
+    Verifies that the configured translation provider can translate a short string.
+    This is used when TRANSLATION_PROVIDER is enabled.
+    """
+    provider = (os.getenv("TRANSLATION_PROVIDER") or "").strip().lower()
+    if provider in ("", "none", "gemini"):
+        return {
+            "status": "skipped",
+            "provider": provider,
+            "configured": False,
+            "note": "Set TRANSLATION_PROVIDER=google (or libretranslate) to enable translation verification.",
+        }
+
+    if provider in ("google", "gcloud", "translate"):
+        if not translate_google.configured():
+            return {
+                "status": "error",
+                "provider": provider,
+                "configured": False,
+                "error": "Missing GOOGLE_CLOUD_API_KEY/GOOGLE_API_KEY",
+            }
+        try:
+            out = await translate_google.translate_batch(["Hello world."], target="am", source="en")
+            sample = out[0].translated_text if out else ""
+            return {
+                "status": "success",
+                "provider": provider,
+                "configured": True,
+                "sample": {"en": "Hello world.", "am": sample},
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "provider": provider,
+                "configured": True,
+                "error": str(e),
+            }
+
+    if provider in ("libretranslate", "libre", "open", "opensource", "open-source"):
+        if not translate_libre.configured():
+            return {
+                "status": "error",
+                "provider": provider,
+                "configured": False,
+                "error": "Missing LIBRETRANSLATE_URL",
+            }
+        try:
+            out = await translate_libre.translate_batch(["Hello world."], target="am", source="en")
+            sample = out[0].translated_text if out else ""
+            return {
+                "status": "success",
+                "provider": provider,
+                "configured": True,
+                "sample": {"en": "Hello world.", "am": sample},
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "provider": provider,
+                "configured": True,
+                "error": str(e),
+            }
+
+    return {
+        "status": "error",
+        "provider": provider,
+        "configured": False,
+        "error": f"Unknown TRANSLATION_PROVIDER={provider!r}",
+    }
+
+
+@app.get("/api/config")
+async def get_config():
+    """Non-secret config summary for the UI."""
+    def _env_bool(name: str, default: bool = False) -> bool:
+        val = os.getenv(name)
+        if val is None:
+            return default
+        return val.strip().lower() in ("1", "true", "yes", "y", "on")
+
+    return {
+        "translation_provider": (os.getenv("TRANSLATION_PROVIDER") or "").strip(),
+        "google_translate_configured": bool(os.getenv("GOOGLE_CLOUD_API_KEY") or os.getenv("GOOGLE_API_KEY")),
+        "libretranslate": {
+            "configured": bool(os.getenv("LIBRETRANSLATE_URL")),
+            "url": (os.getenv("LIBRETRANSLATE_URL") or "").strip(),
+        },
+        "narrator_persona": (os.getenv("NARRATOR_PERSONA") or "futuristic captain").strip(),
+        "script_beats": {
+            "seconds": int(os.getenv("SCRIPT_BEAT_SECONDS") or "20"),
+            "max_beats": int(os.getenv("SCRIPT_MAX_BEATS") or "60"),
+        },
+        "zthumb": {
+            "url": (os.getenv("ZTHUMB_URL") or "").strip(),
+            "allow_fallback_to_openai": _env_bool("ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI", False),
+        },
+    }
+
+
+def _in_docker() -> bool:
+    return os.path.exists("/.dockerenv")
+
+
+def _expand_localhost_url(url: str) -> List[str]:
+    base = url.rstrip("/")
+    urls = [base]
+    if not _in_docker():
+        return urls
+    parsed = urlparse(base if "://" in base else f"http://{base}")
+    host = parsed.hostname
+    port = parsed.port
+    if host not in ("localhost", "127.0.0.1"):
+        return urls
+
+    def with_host(new_host: str) -> str:
+        netloc = new_host
+        if port:
+            netloc = f"{new_host}:{port}"
+        return parsed._replace(netloc=netloc).geturl().rstrip("/")
+
+    urls.append(with_host("host.docker.internal"))
+    # De-dup
+    out: List[str] = []
+    seen = set()
+    for u in urls:
+        if u not in seen:
+            out.append(u)
+            seen.add(u)
+    return out
+
+
+@app.get("/api/verify/zthumb")
+async def verify_zthumb():
+    """
+    ZTHUMB VERIFICATION (OPTIONAL)
+    Checks ZThumb /health and /models from inside the runner container.
+    """
+    z = (os.getenv("ZTHUMB_URL") or "").strip()
+    if not z:
+        return {"status": "skipped", "configured": False, "note": "Set ZTHUMB_URL to enable ZThumb verification."}
+
+    urls = _expand_localhost_url(z)
+    last_err = None
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for base in urls:
+            try:
+                health = (await client.get(f"{base}/health")).json()
+                models = (await client.get(f"{base}/models")).json()
+                return {"status": "success", "configured": True, "base_url": base, "health": health, "models": models}
+            except Exception as e:
+                last_err = e
+                continue
+    return {
+        "status": "error",
+        "configured": True,
+        "urls_tried": urls,
+        "error": str(last_err) if last_err else "unknown error",
     }
 
 

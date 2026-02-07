@@ -13,6 +13,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Colors for output
 RED='\033[0;31m'
@@ -76,8 +77,8 @@ fi
 # Create directories
 echo ""
 echo -e "${YELLOW}[3/4] Setting up directories...${NC}"
-mkdir -p models outputs
-echo -e "${GREEN}  Created: models/, outputs/${NC}"
+mkdir -p "$BASE_DIR/models" "$BASE_DIR/outputs"
+echo -e "${GREEN}  Created: $BASE_DIR/models/, $BASE_DIR/outputs/${NC}"
 
 # Create .env if not exists
 if [ ! -f .env ]; then

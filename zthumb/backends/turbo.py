@@ -49,7 +49,7 @@ class TurboBackend(BaseBackend):
                 )
             
             self.pipe.to(device)
-            
+
             # Enable memory optimizations
             if device == "cuda":
                 try:
@@ -73,7 +73,8 @@ class TurboBackend(BaseBackend):
         output_dir: Path,
         output_format: str,
         upscale: bool = False,
-        face_detail: bool = False
+        face_detail: bool = False,
+        lora_scale=None
     ) -> List[str]:
         """Generate images using SDXL-Turbo."""
         
@@ -84,7 +85,7 @@ class TurboBackend(BaseBackend):
             self._generate_sync,
             prompt, negative_prompt, width, height, seed,
             min(steps, 4),  # Turbo works best with 1-4 steps
-            cfg, batch, output_dir, output_format
+            cfg, batch, output_dir, output_format, lora_scale
         )
         
         # Post-process if requested
@@ -112,12 +113,14 @@ class TurboBackend(BaseBackend):
         cfg: float,
         batch: int,
         output_dir: Path,
-        output_format: str
+        output_format: str,
+        lora_scale
     ) -> List[str]:
         """Synchronous generation."""
         import torch
         
         self._load_pipeline()
+        self.apply_lora(self.pipe, lora_scale=lora_scale)
         
         generator = torch.Generator(device=self.pipe.device).manual_seed(seed)
         

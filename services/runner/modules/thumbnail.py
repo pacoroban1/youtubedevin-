@@ -9,11 +9,84 @@ import subprocess
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import json
+from urllib.parse import urlparse
 
 import httpx
 
 
 class ThumbnailGenerator:
+    def _env_flag(self, name: str, default: bool = False) -> bool:
+        val = os.getenv(name)
+        if val is None:
+            return default
+        return val.strip().lower() in ("1", "true", "yes", "y", "on")
+
+    def _in_docker(self) -> bool:
+        # Heuristic: present in most Docker containers.
+        return os.path.exists("/.dockerenv")
+
+    def _default_gateway_ip(self) -> Optional[str]:
+        """
+        Best-effort default gateway resolver inside a Linux container.
+        Useful to reach services published on the host when `localhost` would
+        otherwise point at the container itself.
+        """
+        try:
+            with open("/proc/net/route", "r", encoding="utf-8") as f:
+                next(f, None)  # header
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) < 3:
+                        continue
+                    dest, gw = parts[1], parts[2]
+                    if dest != "00000000":
+                        continue
+                    b = bytes.fromhex(gw)
+                    return ".".join(str(x) for x in b[::-1])
+        except Exception:
+            return None
+        return None
+
+    def _expand_zthumb_urls(self, url: Optional[str]) -> List[str]:
+        if not url:
+            return []
+        base = url.rstrip("/")
+        urls = [base]
+
+        # If we're in Docker and the user configured localhost, try common host aliases.
+        if not self._in_docker():
+            return urls
+
+        # Ensure urlparse sees a netloc.
+        parsed = urlparse(base if "://" in base else f"http://{base}")
+        host = parsed.hostname
+        port = parsed.port
+        if host not in ("localhost", "127.0.0.1"):
+            return urls
+
+        def with_host(new_host: str) -> str:
+            netloc = new_host
+            if port:
+                netloc = f"{new_host}:{port}"
+            return parsed._replace(netloc=netloc).geturl().rstrip("/")
+
+        # Docker Desktop (macOS/Windows) supports this out of the box.
+        urls.append(with_host("host.docker.internal"))
+
+        # Generic Linux fallback: try the bridge gateway IP.
+        gw = self._default_gateway_ip()
+        if gw:
+            urls.append(with_host(gw))
+
+        # De-dup, preserve order.
+        out: List[str] = []
+        seen = set()
+        for u in urls:
+            if u not in seen:
+                out.append(u)
+                seen.add(u)
+        return out
+
     def __init__(self, db):
         self.db = db
         self.media_dir = os.getenv("MEDIA_DIR", "/app/media")
@@ -22,6 +95,11 @@ class ThumbnailGenerator:
         
         # ZThumb local engine URL (if set, use local generation)
         self.zthumb_url = os.getenv("ZTHUMB_URL")
+        self.zthumb_urls = self._expand_zthumb_urls(self.zthumb_url)
+
+        # Paid fallback is opt-in. If ZTHUMB_URL is set and ZThumb is unavailable,
+        # fail the job instead of silently paying for DALL·E.
+        self.allow_openai_fallback = self._env_flag("ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI", False)
         
         # Thumbnail specs
         self.width = 1280
@@ -75,6 +153,10 @@ class ThumbnailGenerator:
                     await self._generate_zthumb_thumbnail(video_title, hook, thumb_path)
                 else:
                     await self._generate_ai_thumbnail(video_title, hook, thumb_path)
+
+            # Fail fast if we didn't actually produce a thumbnail file.
+            if not os.path.exists(thumb_path):
+                raise Exception(f"Thumbnail generation failed: file not created: {thumb_path}")
             
             # Calculate heuristic score
             score = await self._calculate_heuristic_score(thumb_path)
@@ -303,64 +385,82 @@ Return ONLY 3 hooks, one per line, nothing else."""
     ) -> bool:
         """
         Generate thumbnail using ZThumb local engine.
-        Falls back to OpenAI if ZThumb is unavailable.
+        By default, does NOT fall back to OpenAI when ZTHUMB_URL is set.
+        To allow paid fallback explicitly, set ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI=true.
         """
         if not self.zthumb_url:
             return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
         
+        # Build prompt for cinematic thumbnail
+        prompt = f"cinematic movie poster, dramatic scene, {video_title}, high contrast lighting, volumetric fog, 8k, photorealistic, movie quality"
+
+        payload = {
+            "prompt": prompt,
+            "negative_prompt": "text, watermark, logo, blurry, low quality, cartoon, anime, deformed hands",
+            "width": self.width,
+            "height": self.height,
+            "batch": 3,  # Generate 3 variants
+            "steps": 35,
+            "cfg": 4.5,
+            "variant": "auto",
+            "upscale": True,
+            "face_detail": True,
+            "safe_mode": True,
+            "style_preset": "alien_reveal"
+        }
+
+        urls = self.zthumb_urls or [self.zthumb_url.rstrip("/")]
+        last_conn_err: Optional[Exception] = None
+
         try:
-            # Build prompt for cinematic thumbnail
-            prompt = f"cinematic movie poster, dramatic scene, {video_title}, high contrast lighting, volumetric fog, 8k, photorealistic, movie quality"
-            
-            payload = {
-                "prompt": prompt,
-                "negative_prompt": "text, watermark, logo, blurry, low quality, cartoon, anime, deformed hands",
-                "width": self.width,
-                "height": self.height,
-                "batch": 3,  # Generate 3 variants
-                "steps": 35,
-                "cfg": 4.5,
-                "variant": "auto",
-                "upscale": True,
-                "face_detail": True,
-                "safe_mode": True,
-                "style_preset": "alien_reveal"
-            }
-            
             async with httpx.AsyncClient(timeout=300.0) as client:
-                response = await client.post(
-                    f"{self.zthumb_url}/generate",
-                    json=payload
-                )
-                response.raise_for_status()
-                result = response.json()
-                
-                if result.get("warnings"):
-                    print(f"ZThumb warnings: {result['warnings']}")
-                
-                images = result.get("images", [])
-                if not images:
-                    print("ZThumb returned no images, falling back to OpenAI")
-                    return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
-                
-                # Get the first image (best one based on ZThumb scoring)
-                best_image = images[0].replace("file://", "")
-                
-                # Copy to output path and add text overlay
-                import shutil
-                shutil.copy(best_image, output_path)
-                
-                # Add Amharic text overlay
-                await self._add_text_overlay(output_path, hook_text)
-                
-                return True
-                
-        except httpx.ConnectError:
-            print(f"ZThumb server not available at {self.zthumb_url}, falling back to OpenAI")
-            return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+                for base_url in urls:
+                    try:
+                        response = await client.post(f"{base_url}/generate", json=payload)
+                        response.raise_for_status()
+                        result = response.json()
+
+                        if result.get("warnings"):
+                            print(f"ZThumb warnings: {result['warnings']}")
+
+                        images = result.get("images", [])
+                        if not images:
+                            msg = "ZThumb returned no images"
+                            if self.allow_openai_fallback:
+                                print(f"{msg}, falling back to OpenAI")
+                                return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+                            raise RuntimeError(msg)
+
+                        # Get the first image (best one based on ZThumb scoring)
+                        best_image = images[0].replace("file://", "")
+
+                        # Copy to output path and add text overlay
+                        import shutil
+                        shutil.copy(best_image, output_path)
+
+                        # Add Amharic text overlay
+                        await self._add_text_overlay(output_path, hook_text)
+
+                        return True
+                    except httpx.ConnectError as e:
+                        last_conn_err = e
+                        continue
         except Exception as e:
-            print(f"ZThumb generation error: {e}, falling back to OpenAI")
-            return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+            if self.allow_openai_fallback:
+                print(f"ZThumb generation error: {e}, falling back to OpenAI")
+                return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+            raise
+
+        if last_conn_err is not None:
+            msg = f"ZThumb server not available at {self.zthumb_url}"
+            if len(urls) > 1:
+                msg += f" (tried: {', '.join(urls)})"
+            if self.allow_openai_fallback:
+                print(f"{msg}, falling back to OpenAI")
+                return await self._generate_ai_thumbnail(video_title, hook_text, output_path)
+            raise RuntimeError(msg) from last_conn_err
+
+        raise RuntimeError("ZThumb generation failed for unknown reasons")
     
     async def _generate_ai_thumbnail(
         self,

@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Large model weights and generated artifacts
+models/*
+!models/.gitkeep
+
+# Generated artifacts (keep directory scaffolding)
+outputs/**
+!outputs/**/
+!outputs/**/.gitkeep
+
+# Local datasets (keep structure, not content)
+datasets/thumbs/images/*
+datasets/thumbs/captions/*
+datasets/thumbs/masks/*
+!datasets/thumbs/**/.gitkeep

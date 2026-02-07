@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RECAP INTELLIGENCE</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <!-- Neural Activity Bar -->
+    <div class="neural-bar">
+      <div class="neural-bar__pulse" id="neuralPulse"></div>
+      <div class="neural-bar__stream" id="neuralStream"></div>
+    </div>
+
+    <!-- Command Header -->
+    <header class="command-bar">
+      <div class="command-bar__left">
+        <div class="logo-glow"></div>
+        <span class="logo-title">RECAP INTELLIGENCE</span>
+        <span class="logo-version">v2.0</span>
+      </div>
+      <div class="command-bar__center">
+        <div class="system-status" id="systemStatus">
+          <span class="system-status__indicator" id="systemStatusIndicator"></span>
+          <span class="system-status__text" id="systemStatusText">NEURAL CORE ONLINE</span>
+        </div>
+      </div>
+      <div class="command-bar__right">
+        <div class="metrics-mini">
+          <div class="metric-mini">
+            <span class="metric-mini__value" id="metricConfidence">98%</span>
+            <span class="metric-mini__label">CONFIDENCE</span>
+          </div>
+          <div class="metric-mini">
+            <span class="metric-mini__value" id="metricTokens">0</span>
+            <span class="metric-mini__label">TOKENS</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main-grid">
+      <!-- LEFT PANEL: Swarm Agents -->
+      <aside class="panel panel--swarm">
+        <div class="panel__header">
+          <span class="panel__title">SWARM AGENTS</span>
+          <span class="panel__badge" id="activeAgents">5/5</span>
+        </div>
+        <div class="swarm-agents" id="swarmAgents">
+          <div class="agent" data-agent="scout" data-status="idle">
+            <div class="agent__glow"></div>
+            <div class="agent__icon">&#128301;</div>
+            <div class="agent__info">
+              <div class="agent__name">SCOUT</div>
+              <div class="agent__role">Video Discovery</div>
+            </div>
+            <div class="agent__status">IDLE</div>
+          </div>
+          <div class="agent" data-agent="translator" data-status="idle">
+            <div class="agent__glow"></div>
+            <div class="agent__icon">&#127760;</div>
+            <div class="agent__info">
+              <div class="agent__name">TRANSLATOR</div>
+              <div class="agent__role">Amharic Conversion</div>
+            </div>
+            <div class="agent__status">IDLE</div>
+          </div>
+          <div class="agent" data-agent="voice" data-status="idle">
+            <div class="agent__glow"></div>
+            <div class="agent__icon">&#127897;</div>
+            <div class="agent__info">
+              <div class="agent__name">VOICE_SYNTH</div>
+              <div class="agent__role">Audio Generation</div>
+            </div>
+            <div class="agent__status">IDLE</div>
+          </div>
+          <div class="agent" data-agent="renderer" data-status="idle">
+            <div class="agent__glow"></div>
+            <div class="agent__icon">&#127916;</div>
+            <div class="agent__info">
+              <div class="agent__name">RENDERER</div>
+              <div class="agent__role">Video Assembly</div>
+            </div>
+            <div class="agent__status">IDLE</div>
+          </div>
+          <div class="agent" data-agent="optimizer" data-status="idle">
+            <div class="agent__glow"></div>
+            <div class="agent__icon">&#128640;</div>
+            <div class="agent__info">
+              <div class="agent__name">OPTIMIZER</div>
+              <div class="agent__role">Quality Enhancement</div>
+            </div>
+            <div class="agent__status">IDLE</div>
+          </div>
+        </div>
+        
+        <!-- Agent Handoff Visualization -->
+        <div class="handoff-viz">
+          <div class="handoff-viz__title">DATA FLOW</div>
+          <canvas id="handoffCanvas" width="200" height="80"></canvas>
+        </div>
+      </aside>
+
+      <!-- CENTER: Main Canvas -->
+      <section class="panel panel--main">
+        <div class="panel__header">
+          <span class="panel__title">NEURAL WORKFLOW</span>
+          <div class="panel__controls">
+            <button class="ctrl-btn" id="btnSchedule" title="Schedule">&#128337;</button>
+            <button class="ctrl-btn ctrl-btn--primary" id="btnRunNow" title="Execute">&#9654;</button>
+          </div>
+        </div>
+        
+        <!-- Workflow Canvas -->
+        <div class="workflow-canvas" id="workflowCanvas">
+          <!-- Workflow Nodes -->
+          <div class="workflow-nodes">
+            <div class="wf-node wf-node--trigger" id="node-trigger">
+              <div class="wf-node__pulse"></div>
+              <div class="wf-node__core">
+                <div class="wf-node__icon">&#9201;</div>
+              </div>
+              <div class="wf-node__label">TRIGGER</div>
+              <div class="wf-node__confidence" id="conf-trigger">--</div>
+            </div>
+            
+            <div class="wf-connector"></div>
+            
+            <div class="wf-node" id="node-discover">
+              <div class="wf-node__pulse"></div>
+              <div class="wf-node__core">
+                <div class="wf-node__icon">&#128269;</div>
+              </div>
+              <div class="wf-node__label">DISCOVER</div>
+              <div class="wf-node__confidence" id="conf-discover">--</div>
+            </div>
+            
+            <div class="wf-connector"></div>
+            
+            <div class="wf-node" id="node-ingest">
+              <div class="wf-node__pulse"></div>
+              <div class="wf-node__core">
+                <div class="wf-node__icon">&#128229;</div>
+              </div>
+              <div class="wf-node__label">INGEST</div>
+              <div class="wf-node__confidence" id="conf-ingest">--</div>
+            </div>
+            
+            <div class="wf-connector"></div>
+            
+            <div class="wf-node" id="node-script">
+              <div class="wf-node__pulse"></div>
+              <div class="wf-node__core">
+                <div class="wf-node__icon">&#127760;</div>
+              </div>
+              <div class="wf-node__label">TRANSLATE</div>
+              <div class="wf-node__confidence" id="conf-translate">--</div>
+            </div>
+            
+            <div class="wf-connector"></div>
+            
+            <div class="wf-node" id="node-voice">
+              <div class="wf-node__pulse"></div>
+              <div class="wf-node__core">
+                <div class="wf-node__icon">&#127897;</div>
+              </div>
+              <div class="wf-node__label">VOICE</div>
+              <div class="wf-node__confidence" id="conf-voice">--</div>
+            </div>
+            
+            <div class="wf-connector"></div>
+            
+            <div class="wf-node" id="node-render">
+              <div class="wf-node__pulse"></div>
+              <div class="wf-node__core">
+                <div class="wf-node__icon">&#127916;</div>
+              </div>
+              <div class="wf-node__label">RENDER</div>
+              <div class="wf-node__confidence" id="conf-render">--</div>
+            </div>
+            
+            <div class="wf-connector"></div>
+            
+            <div class="wf-node wf-node--success" id="node-complete">
+              <div class="wf-node__pulse"></div>
+              <div class="wf-node__core">
+                <div class="wf-node__icon">&#10004;</div>
+              </div>
+              <div class="wf-node__label">COMPLETE</div>
+              <div class="wf-node__confidence" id="conf-complete">--</div>
+            </div>
+          </div>
+          
+          <!-- Progress Indicator -->
+          <div class="workflow-progress">
+            <div class="workflow-progress__track">
+                          <div class="workflow-progress__fill" id="workflowProgressFill"></div>
+                        </div>
+                        <div class="workflow-progress__text" id="workflowProgressText">AWAITING TRIGGER</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT PANEL: Intelligence -->
+      <aside class="panel panel--intel">
+        <div class="panel__header">
+          <span class="panel__title">INTELLIGENCE</span>
+        </div>
+        
+        <!-- Predictions -->
+        <div class="intel-section">
+          <div class="intel-section__title">PREDICTIONS</div>
+          <div class="prediction-cards">
+            <div class="pred-card">
+              <div class="pred-card__icon">&#128200;</div>
+              <div class="pred-card__info">
+                <div class="pred-card__label">ENGAGEMENT</div>
+                <div class="pred-card__value" id="predEngagement">87%</div>
+              </div>
+            </div>
+            <div class="pred-card">
+              <div class="pred-card__icon">&#128337;</div>
+              <div class="pred-card__info">
+                <div class="pred-card__label">BEST POST TIME</div>
+                <div class="pred-card__value" id="predPostTime">18:00</div>
+              </div>
+            </div>
+            <div class="pred-card">
+              <div class="pred-card__icon">&#127942;</div>
+              <div class="pred-card__info">
+                <div class="pred-card__label">QUALITY SCORE</div>
+                <div class="pred-card__value" id="predQuality">A+</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Decision Log -->
+        <div class="intel-section">
+          <div class="intel-section__title">AI DECISIONS</div>
+          <div class="decision-log" id="decisionLog">
+            <div class="decision-item decision-item--info">
+              <span class="decision-item__time">--:--</span>
+              <span class="decision-item__text">Awaiting execution...</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Evolution Metrics -->
+        <div class="intel-section">
+          <div class="intel-section__title">EVOLUTION</div>
+          <div class="evolution-metrics">
+            <div class="evo-metric">
+              <div class="evo-metric__label">LEARNING</div>
+              <div class="evo-metric__bar">
+                <div class="evo-metric__fill" id="evoLearningFill" style="width: 78%"></div>
+              </div>
+              <div class="evo-metric__value" id="evoLearningValue">78%</div>
+            </div>
+            <div class="evo-metric">
+              <div class="evo-metric__label">ACCURACY</div>
+              <div class="evo-metric__bar">
+                <div class="evo-metric__fill" id="evoAccuracyFill" style="width: 94%"></div>
+              </div>
+              <div class="evo-metric__value" id="evoAccuracyValue">94%</div>
+            </div>
+            <div class="evo-metric">
+              <div class="evo-metric__label">EFFICIENCY</div>
+              <div class="evo-metric__bar">
+                <div class="evo-metric__fill" id="evoEfficiencyFill" style="width: 87%"></div>
+              </div>
+              <div class="evo-metric__value" id="evoEfficiencyValue">87%</div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Resources -->
+        <div class="intel-section">
+          <div class="intel-section__title">RESOURCES</div>
+          <div class="resource-grid">
+            <div class="resource-item">
+              <div class="resource-item__value" id="resourceTokens">0</div>
+              <div class="resource-item__label">TOKENS</div>
+            </div>
+            <div class="resource-item">
+              <div class="resource-item__value" id="resourceApi">0</div>
+              <div class="resource-item__label">API CALLS</div>
+            </div>
+            <div class="resource-item">
+              <div class="resource-item__value" id="resourceCost">$0.00</div>
+              <div class="resource-item__label">EST. COST</div>
+            </div>
+            <div class="resource-item">
+              <div class="resource-item__value" id="resourceRuntime">0s</div>
+              <div class="resource-item__label">RUNTIME</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Bottom: Activity Stream -->
+    <footer class="activity-stream">
+      <div class="activity-stream__header">
+        <span class="activity-stream__title">NEURAL ACTIVITY</span>
+        <span class="activity-stream__indicator" id="activityIndicator"></span>
+      </div>
+      <div class="activity-stream__content" id="activityContent">
+        <div class="activity-item">
+          <span class="activity-item__prefix">&gt;&gt;</span>
+          <span class="activity-item__text">System initialized. Neural core ready. Awaiting command.</span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Schedule Modal -->
+    <div class="modal hidden" id="scheduleModal">
+      <div class="modal__backdrop"></div>
+      <div class="modal__content">
+        <div class="modal__header">
+          <span class="modal__title">SCHEDULE CONFIGURATION</span>
+          <button class="modal__close" id="btnCloseSchedule">&times;</button>
+        </div>
+        <div class="modal__body">
+          <div class="schedule-config">
+            <div class="schedule-option">
+              <label class="toggle-switch">
+                <input type="checkbox" id="scheduleToggle" checked />
+                <span class="toggle-switch__slider"></span>
+              </label>
+              <span class="schedule-option__label">Enable Autonomous Mode</span>
+            </div>
+            <div class="schedule-time-select">
+              <label>Execute Daily At:</label>
+              <select id="scheduleHour" class="select-futuristic">
+                <option value="0">00:00</option>
+                <option value="6" selected>06:00</option>
+                <option value="12">12:00</option>
+                <option value="18">18:00</option>
+              </select>
+            </div>
+            <div class="schedule-prediction">
+              <div class="schedule-prediction__title">AI RECOMMENDATION</div>
+              <div class="schedule-prediction__text">
+                Based on engagement patterns, optimal posting time is <strong>18:00 UTC</strong> for maximum reach.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal__footer">
+          <button class="btn-futuristic" id="btnSaveSchedule">SAVE CONFIGURATION</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Output Modal -->
+    <div class="modal hidden" id="outputModal">
+      <div class="modal__backdrop"></div>
+      <div class="modal__content modal__content--large">
+        <div class="modal__header">
+          <span class="modal__title">MISSION COMPLETE</span>
+          <button class="modal__close" id="btnCloseOutput">&times;</button>
+        </div>
+        <div class="modal__body">
+          <div class="output-display">
+            <div class="output-preview">
+              <img id="outputPreviewImg" src="" alt="Generated Thumbnail" />
+            </div>
+            <div class="output-details">
+                            <div class="output-title" id="outputTitleText">Your Amharic Recap</div>
+                            <div class="output-meta" id="outputMetaText"></div>
+              <div class="output-scores">
+                <div class="output-score">
+                  <span class="output-score__label">Quality</span>
+                  <span class="output-score__value" id="outputQuality">A+</span>
+                </div>
+                <div class="output-score">
+                  <span class="output-score__label">Engagement</span>
+                  <span class="output-score__value" id="outputEngagement">87%</span>
+                </div>
+              </div>
+              <div class="output-actions">
+                <a class="btn-futuristic btn-futuristic--primary" id="btnDownloadVideo" href="#" download>
+                  DOWNLOAD VIDEO
+                </a>
+                <a class="btn-futuristic" id="btnDownloadThumb" href="#" download>
+                  DOWNLOAD THUMBNAIL
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+
