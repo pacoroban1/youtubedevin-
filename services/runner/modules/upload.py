@@ -27,6 +27,12 @@ class YouTubeUploader:
         self.client_id = os.getenv("YOUTUBE_CLIENT_ID")
         self.client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
         self.refresh_token = os.getenv("YOUTUBE_REFRESH_TOKEN")
+
+        # Upload defaults
+        # Allowed: public | unlisted | private
+        self.privacy_status = (os.getenv("YOUTUBE_PRIVACY_STATUS") or "public").strip().lower()
+        if self.privacy_status not in ("public", "unlisted", "private"):
+            self.privacy_status = "public"
         
         # YouTube API scopes
         self.scopes = [
@@ -346,7 +352,7 @@ Write the description, nothing else."""
                     "defaultAudioLanguage": "am"
                 },
                 "status": {
-                    "privacyStatus": "public",
+                    "privacyStatus": self.privacy_status,
                     "selfDeclaredMadeForKids": False
                 }
             }

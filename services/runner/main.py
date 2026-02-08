@@ -139,6 +139,7 @@ class FullPipelineRequest(BaseModel):
     min_views_per_hour: float = 250.0
     min_views_total: int = 20000
     min_duration_seconds: int = 180
+    auto_select_max_candidates: int = 3
 
 class DiscoverRequest(BaseModel):
     queries: Optional[List[str]] = None
@@ -475,10 +476,15 @@ async def run_pipeline_full(request: FullPipelineRequest, http_request: Request)
     This is useful for n8n scheduled runs that want a single request to succeed/fail
     based on the full run (rather than fire-and-forget async jobs).
     """
-    video_id = request.video_id
     results: Dict[str, Any] = {}
+    attempted: List[str] = []
+    errors: List[Dict[str, Any]] = []
+
     try:
-        if not video_id and request.auto_select:
+        candidates: List[str] = []
+        if request.video_id:
+            candidates = [request.video_id]
+        elif request.auto_select:
             results["discover"] = await discovery.discover_top_channels(
                 queries=request.queries,
                 top_n=request.top_n_channels,
@@ -489,24 +495,74 @@ async def run_pipeline_full(request: FullPipelineRequest, http_request: Request)
                 min_views_total=request.min_views_total,
                 min_duration_seconds=request.min_duration_seconds,
             )
-            if (results["discover"] or {}).get("selected_video_id"):
-                video_id = results["discover"]["selected_video_id"]
-            elif (results["discover"] or {}).get("videos"):
-                video_id = results["discover"]["videos"][0]["video_id"]
-        if not video_id:
+            discover_out = results.get("discover") or {}
+            sel = discover_out.get("selected_video_id")
+            if sel:
+                candidates.append(str(sel))
+            for v in (discover_out.get("videos") or []):
+                if not isinstance(v, dict):
+                    continue
+                vid = v.get("video_id")
+                if vid and str(vid) not in candidates:
+                    candidates.append(str(vid))
+        else:
             return _json(http_request, 400, {"status": "error", "error": "missing_video_id", "message": "video_id required (or set auto_select=true)"})
 
-        results["ingest"] = await ingest.process_video(video_id)
-        results["script"] = await script_gen.generate_full_script(video_id)
-        results["voice"] = await voice_gen.generate_narration(video_id)
-        results["render"] = await timing.render_with_alignment(video_id)
-        results["thumbnail"] = await thumbnail_gen.generate_thumbnails(video_id)
-        results["upload"] = await uploader.upload_video(video_id)
-        results["distribute"] = await growth.distribute_and_track(video_id)
+        # Clamp candidates to keep runs bounded.
+        max_cands = int(request.auto_select_max_candidates or 1)
+        max_cands = max(1, min(max_cands, 10))
+        candidates = candidates[:max_cands]
 
-        return _json(http_request, 200, {"status": "success", "video_id": video_id, "results": results})
+        if not candidates:
+            return _json(http_request, 502, {"status": "error", "error": "auto_select_failed", "message": "auto-select found no videos", "results": results})
+
+        for video_id in candidates:
+            attempted.append(video_id)
+            attempt_results: Dict[str, Any] = {}
+            try:
+                attempt_results["ingest"] = await ingest.process_video(video_id)
+                attempt_results["script"] = await script_gen.generate_full_script(video_id)
+                attempt_results["voice"] = await voice_gen.generate_narration(video_id)
+                attempt_results["render"] = await timing.render_with_alignment(video_id)
+                attempt_results["thumbnail"] = await thumbnail_gen.generate_thumbnails(video_id)
+                attempt_results["upload"] = await uploader.upload_video(video_id)
+
+                # Growth/distribution is non-critical: do not fail the whole run if it errors.
+                try:
+                    attempt_results["distribute"] = await growth.distribute_and_track(video_id)
+                except Exception as dist_e:
+                    attempt_results["distribute"] = {"status": "error", "error": "distribute_failed", "message": str(dist_e)}
+
+                results.update(attempt_results)
+                return _json(
+                    http_request,
+                    200,
+                    {
+                        "status": "success",
+                        "video_id": video_id,
+                        "results": results,
+                        "attempted_video_ids": attempted,
+                        "errors": errors,
+                    },
+                )
+            except Exception as e:
+                errors.append({"video_id": video_id, "error": str(e)})
+                continue
+
+        return _json(
+            http_request,
+            502,
+            {
+                "status": "error",
+                "error": "pipeline_failed",
+                "message": "all auto-select candidates failed",
+                "results": results,
+                "attempted_video_ids": attempted,
+                "errors": errors,
+            },
+        )
     except Exception as e:
-        return _json(http_request, 502, {"status": "error", "error": "pipeline_failed", "message": str(e), "video_id": video_id, "results": results})
+        return _json(http_request, 502, {"status": "error", "error": "pipeline_failed", "message": str(e), "results": results, "attempted_video_ids": attempted, "errors": errors})
 
 @app.get("/api/jobs")
 async def list_jobs(limit: int = 20, request: Request = None):
