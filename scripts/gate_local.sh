@@ -51,10 +51,10 @@ fi
 if [[ -n "${VIDEO_ID}" ]]; then
   # Avoid echoing request payloads (may contain ids). Only surface on failure.
   run_step "pipeline_full" bash -lc "\
-    body=\$(python3 - <<'PY'\nimport json, os\nprint(json.dumps({\"video_id\": os.environ.get(\"VIDEO_ID\"), \"auto_select\": False}))\nPY\n    ); \
+    body=\$(python3 -c 'import json, os; print(json.dumps({\"video_id\": os.environ.get(\"VIDEO_ID\"), \"auto_select\": False}))'); \
     code=\$(curl -sS -o \"${_tmp_dir}/pipeline.json\" -w '%{http_code}' -X POST \"${RUNNER_URL}/api/pipeline/full\" -H 'Content-Type: application/json' -d \"\$body\" || true); \
     test \"\$code\" = \"200\"; \
-    python3 - <<'PY'\nimport json\ndata = json.load(open(\"${_tmp_dir}/pipeline.json\", \"r\", encoding=\"utf-8\"))\nassert data.get(\"status\") == \"success\", data\nPY"
+    python3 -c 'import json, sys; data=json.load(open(sys.argv[1], \"r\", encoding=\"utf-8\")); assert data.get(\"status\")==\"success\", data' \"${_tmp_dir}/pipeline.json\""
 fi
 
 echo "LOCAL GATE PASSED"

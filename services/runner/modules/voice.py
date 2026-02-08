@@ -7,6 +7,7 @@ import os
 import asyncio
 import base64
 import logging
+import re
 import wave
 import contextlib
 from typing import Dict, Any, List
@@ -25,7 +26,26 @@ class VoiceGenerator:
         
         # Gemini Voice settings
         # "Puck" is a good default for "futuristic captain" but we can change if needed
-        self.voice_name = "Puck" 
+        self.voice_name = (os.getenv("GEMINI_TTS_VOICE_NAME") or "Puck").strip() or "Puck"
+
+    def _decode_audio_bytes(self, audio_bytes: bytes) -> bytes:
+        """
+        Gemini TTS may return base64-encoded audio bytes (often raw PCM), not a WAV container.
+        Decode base64 when it looks like base64 text; otherwise return bytes unchanged.
+        """
+        if not audio_bytes:
+            return audio_bytes
+
+        # Quick heuristic: base64-ish ASCII payloads are common. Avoid decoding truly binary data.
+        head = audio_bytes[:256]
+        if all(c in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\n\r" for c in head):
+            try:
+                dec = base64.b64decode(audio_bytes, validate=False)
+                if dec:
+                    return dec
+            except Exception:
+                pass
+        return audio_bytes
     
     async def generate_narration(self, video_id: str) -> Dict[str, Any]:
         """
@@ -149,15 +169,7 @@ class VoiceGenerator:
         # Write required path + legacy pipeline path.
         # The SDK sometimes returns raw PCM bytes (no RIFF header) or base64 text bytes.
         # Ensure we always write a valid WAV container.
-        wav_bytes = audio_bytes
-        if not wav_bytes.startswith(b"RIFF"):
-            # Try base64 decode first (common for inline_data).
-            try:
-                dec = base64.b64decode(wav_bytes, validate=False)
-                if dec.startswith(b"RIFF"):
-                    wav_bytes = dec
-            except Exception:
-                pass
+        wav_bytes = self._decode_audio_bytes(audio_bytes)
 
         if wav_bytes.startswith(b"RIFF"):
             with open(tts_path, "wb") as f:
