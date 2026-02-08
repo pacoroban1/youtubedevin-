@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 import httpx
 from urllib.parse import urlparse
+import re
 
 from modules.discovery import ChannelDiscovery
 from modules.ingest import VideoIngest
@@ -183,6 +184,55 @@ def _json(request: Request, status_code: int, payload: Dict[str, Any]) -> JSONRe
         payload["request_id"] = _req_id(request)
     return JSONResponse(status_code=status_code, content=payload, headers={"X-Request-ID": _req_id(request)})
 
+def _parse_backlog_video_ids() -> List[str]:
+    raw = (os.getenv("BACKLOG_VIDEO_IDS") or "").strip()
+    if not raw:
+        return []
+    parts = re.split(r"[,\s]+", raw)
+    out: List[str] = []
+    for p in parts:
+        s = (p or "").strip()
+        if not s:
+            continue
+        if "watch?v=" in s:
+            try:
+                vid = s.split("watch?v=", 1)[1].split("&", 1)[0]
+                if vid:
+                    out.append(vid)
+                    continue
+            except Exception:
+                pass
+        if "youtu.be/" in s:
+            try:
+                vid = s.split("youtu.be/", 1)[1].split("?", 1)[0].split("&", 1)[0]
+                if vid:
+                    out.append(vid)
+                    continue
+            except Exception:
+                pass
+        out.append(s)
+    # De-dupe while preserving order.
+    seen = set()
+    deduped: List[str] = []
+    for vid in out:
+        if vid in seen:
+            continue
+        seen.add(vid)
+        deduped.append(vid)
+    return deduped
+
+def _filter_unuploaded(video_ids: List[str]) -> List[str]:
+    out: List[str] = []
+    for vid in video_ids:
+        try:
+            row = db.get_video(vid)  # type: ignore[name-defined]
+            if row and (row.get("status") == "uploaded"):
+                continue
+        except Exception:
+            pass
+        out.append(vid)
+    return out
+
 def _cached_full_script(video_id: str) -> Optional[Dict[str, Any]]:
     """
     Best-effort cache layer: if we already have a full_script stored in the DB,
@@ -232,6 +282,10 @@ async def _run_pipeline_full_job(job_id: str, request: FullPipelineRequest) -> N
                 video_id = discovery_result["selected_video_id"]
             elif discovery_result.get("videos"):
                 video_id = discovery_result["videos"][0]["video_id"]
+            else:
+                backlog = _filter_unuploaded(_parse_backlog_video_ids())
+                if backlog:
+                    video_id = backlog[0]
             
             if not video_id:
                 raise RuntimeError("auto-select found no videos")
@@ -505,6 +559,11 @@ async def run_pipeline_full(request: FullPipelineRequest, http_request: Request)
                 vid = v.get("video_id")
                 if vid and str(vid) not in candidates:
                     candidates.append(str(vid))
+            if not candidates:
+                # Backlog fallback when Scout cannot find a candidate (quota/no results/etc.).
+                backlog = _filter_unuploaded(_parse_backlog_video_ids())
+                if backlog:
+                    candidates = backlog[:]
         else:
             return _json(http_request, 400, {"status": "error", "error": "missing_video_id", "message": "video_id required (or set auto_select=true)"})
 

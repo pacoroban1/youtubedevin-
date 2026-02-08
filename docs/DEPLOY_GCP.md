@@ -85,6 +85,9 @@ For true YouTube upload autopilot, also set:
 - `YOUTUBE_API_KEY`
 - `YOUTUBE_PRIVACY_STATUS` (`public` | `unlisted` | `private`) (recommended: start with `unlisted`)
 
+Optional reliability:
+- `BACKLOG_VIDEO_IDS` (comma/space-separated video IDs or URLs) so daily runs keep working even if Scout is down/quota-limited.
+
 Tip: start from `.env.example`.
 
 ## 5) Promote A Tag To The VM (single command)

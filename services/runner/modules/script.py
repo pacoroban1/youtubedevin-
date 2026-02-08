@@ -42,6 +42,8 @@ class ScriptGenerator:
         self.narrator_persona = (os.getenv("NARRATOR_PERSONA") or "futuristic captain").strip()
         self.beat_seconds = int(os.getenv("SCRIPT_BEAT_SECONDS") or "20")
         self.max_beats = int(os.getenv("SCRIPT_MAX_BEATS") or "60")
+        self.quality_min = float(os.getenv("SCRIPT_QUALITY_MIN") or "0.85")
+        self.max_attempts = int(os.getenv("SCRIPT_MAX_ATTEMPTS") or "2")
 
     async def generate_full_script(self, video_id: str) -> Dict[str, Any]:
         """Generates a full structured script for the video."""
@@ -57,11 +59,14 @@ class ScriptGenerator:
         # using 50k chars is safe and usually enough for a movie recap
         transcript_context = transcript[:50000]
 
-        prompt = f"""
+        base_prompt = f"""
 You are an expert Amharic scriptwriter for YouTube movie recaps.
 Your persona is: {self.narrator_persona}.
 
 Task: Write a full movie recap script in Amharic (Ge'ez script).
+Critical: This must be a NEW retelling (transformative), not a literal translation and not copied phrasing.
+Style: High energy, suspenseful, Ethiopian audience context, short punchy sentences, rhetorical questions, open loops.
+
 Video Title: {video_title}
 Transcript Source:
 {transcript_context}
@@ -97,23 +102,63 @@ Output JSON format matches this schema:
 """
         
         try:
-            # We use the generate_json method from our client
-            script_obj = gemini.generate_json(prompt, FullScript)
-            
-            if not script_obj:
-                raise RuntimeError("Empty response from Gemini")
-            
-            # The Gemini client returns parsed JSON (dict/list). Coerce into a dict and
-            # normalize keys to what downstream modules + DB schema expect.
-            if isinstance(script_obj, BaseModel):
-                script_obj = script_obj.model_dump()
-            if isinstance(script_obj, str):
-                script_obj = json.loads(script_obj)
-            if not isinstance(script_obj, dict):
-                raise RuntimeError(f"unexpected_script_type:{type(script_obj)}")
+            # We use the generate_json method from our client.
+            # Add a small quality loop to avoid flat/literal outputs (bounded attempts to control cost).
+            revision_notes = ""
+            last_err: Optional[Exception] = None
+            structured: Dict[str, Any] = {}
+            legacy: Dict[str, Any] = {}
+            script_obj: Any = None
 
-            structured = self._normalize_structured_script(script_obj)
-            legacy = self._structured_to_legacy_fields(structured)
+            for attempt in range(max(1, self.max_attempts)):
+                prompt = base_prompt
+                if revision_notes:
+                    prompt += f"\n\nRevision notes:\n{revision_notes}\n"
+
+                script_obj = gemini.generate_json(prompt, FullScript)
+            
+                if not script_obj:
+                    raise RuntimeError("Empty response from Gemini")
+            
+                # The Gemini client returns parsed JSON (dict/list). Coerce into a dict and
+                # normalize keys to what downstream modules + DB schema expect.
+                if isinstance(script_obj, BaseModel):
+                    script_obj = script_obj.model_dump()
+                if isinstance(script_obj, str):
+                    script_obj = json.loads(script_obj)
+                if not isinstance(script_obj, dict):
+                    raise RuntimeError(f"unexpected_script_type:{type(script_obj)}")
+
+                structured = self._normalize_structured_script(script_obj)
+                legacy = self._structured_to_legacy_fields(structured)
+
+                # Basic validity/quality heuristics (cheap, local).
+                q = float(structured.get("quality_score") or 0.0)
+                beats = structured.get("beats") or []
+                hook = str(structured.get("hook") or "")
+                latin = sum(1 for c in hook if ("a" <= c.lower() <= "z"))
+                if hook:
+                    latin_ratio = float(latin) / float(len(hook))
+                else:
+                    latin_ratio = 0.0
+
+                ok_shape = bool(hook.strip()) and isinstance(beats, list) and len(beats) >= 3
+                ok_quality = (q >= self.quality_min) and (latin_ratio <= 0.15)
+
+                if ok_shape and ok_quality:
+                    last_err = None
+                    break
+
+                if attempt >= (max(1, self.max_attempts) - 1):
+                    # Last attempt: accept what we got (still stored; downstream may regenerate later).
+                    break
+
+                revision_notes = (
+                    "Make it more cinematic and high-energy for Ethiopian viewers. "
+                    "Avoid literal translation. Use short punchy Amharic sentences (Ge'ez script). "
+                    "Stronger hook in first 5-10 seconds. Add rhetorical questions and suspense. "
+                    "Return valid JSON only."
+                )
 
             # Persist (DB schema expects legacy fields; also store full structured JSON).
             db_record = {
