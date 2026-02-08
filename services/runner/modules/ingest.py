@@ -269,7 +269,14 @@ class VideoIngest:
     
     async def _transcribe_audio(self, audio_path: str, video_id: str) -> Dict[str, Any]:
         """Transcribe audio using Whisper or Gemini."""
-        # Try Whisper first (local)
+        # Prefer Gemini if configured (cloud, reliable, matches "Google-only" objective).
+        if gemini.is_configured():
+            try:
+                return await self._transcribe_with_gemini(audio_path)
+            except Exception as e:
+                print(f"Gemini transcription failed: {e}")
+
+        # Fallback to Whisper (local).
         try:
             import whisper
             
@@ -292,13 +299,6 @@ class VideoIngest:
             
         except Exception as e:
             print(f"Whisper transcription failed: {e}")
-        
-        # Fallback to Gemini if available
-        if self.gemini_api_key:
-            try:
-                return await self._transcribe_with_gemini(audio_path)
-            except Exception as e:
-                print(f"Gemini transcription failed: {e}")
         
         return {
             "raw_transcript": "",
