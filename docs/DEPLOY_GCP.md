@@ -83,6 +83,7 @@ For true YouTube upload autopilot, also set:
 - `YOUTUBE_CLIENT_SECRET`
 - `YOUTUBE_REFRESH_TOKEN`
 - `YOUTUBE_API_KEY`
+- `YOUTUBE_PRIVACY_STATUS` (`public` | `unlisted` | `private`) (recommended: start with `unlisted`)
 
 Tip: start from `.env.example`.
 
@@ -172,4 +173,3 @@ make promote TAG=v1.0.0
 No-domain mode:
 - Set `CADDY_SITE=:80` for HTTP only.
 - Real TLS without a domain is not available via Let's Encrypt. (You can use self-signed/internal TLS, but browsers will warn unless you trust the CA.)
-
