@@ -1,6 +1,6 @@
 ---
 name: RecapFactory Core Production
-description: Run the core “one video in -> Amharic recap out” production steps (scout/ingest/transcript/script/voice/audio windows/render/subtitles/thumbnail/metadata) using the local runner API and repo tooling.
+description: Run the core "one video in -> Amharic recap out" production steps (scout/ingest/transcript/script/voice/audio windows/render/subtitles/thumbnail/metadata) using the local runner API and repo tooling.
 ---
 
 # RecapFactory Core Production
@@ -12,7 +12,7 @@ Repo context (assumed)
 1. Media root in runner container at `/app/media`
 1. Outputs exported to host under `outputs/`
 
-## Subskills (Names + What “Done” Means)
+## Subskills (Names + What "Done" Means)
 
 ## RecapSource_Scout
 Goal: pick a candidate `video_id` to run today.
@@ -44,7 +44,7 @@ Verification
 Goal: prefer captions/subtitles when available.
 
 Steps
-1. Ensure ingest path tries captions first (do not regress into “always ASR”).
+1. Ensure ingest path tries captions first (do not regress into "always ASR").
 1. Add a small regression check: ingest completes without invoking ASR when captions exist (best-effort; depends on source).
 
 Acceptance criteria
@@ -57,7 +57,7 @@ Verification
 Goal: if captions are missing, fall back to speech-to-text.
 
 Steps
-1. Ensure ingest has an ASR fallback path and doesn’t crash on missing captions.
+1. Ensure ingest has an ASR fallback path and doesn't crash on missing captions.
 
 Acceptance criteria
 - Ingest succeeds on a video without captions.
@@ -122,7 +122,7 @@ Verification
 - `curl -fsS -X POST "http://localhost:8000/api/voice/$VIDEO_ID?force=1&voice_name=Charon" | python3 -m json.tool`
 
 ## Voice_PostProcess_Cinematic
-Goal: optional “deeper / tighter / cinematic” processing.
+Goal: optional "deeper / tighter / cinematic" processing.
 
 Steps
 1. Start with preview-only processing on `tts_preview_*.wav`.
@@ -135,7 +135,7 @@ Verification
 - `ls -la outputs | rg tts_preview_.*_cinematic\\.wav || true`
 
 ## Audio_WindowMarker
-Goal: allow brief “movie audio moments” while keeping source narration muted.
+Goal: allow brief "movie audio moments" while keeping source narration muted.
 
 Steps
 1. Default to no windows.

@@ -5,7 +5,7 @@ description: Make the recap pipeline run hands-free with scheduling, retries, ar
 
 # RecapFactory Orchestration
 
-Use this skill to run the system daily/weekly without babysitting, and to harden “ops” behavior without changing core pipeline logic.
+Use this skill to run the system daily/weekly without babysitting, and to harden "ops" behavior without changing core pipeline logic.
 
 Assumptions
 1. Runner API is reachable from n8n using the docker service name: `http://runner:8000`
@@ -46,7 +46,7 @@ Goal: retry safe steps, fail fast on hard blockers.
 
 Steps
 1. Use bounded retries in n8n for transient errors (network, 5xx, timeouts).
-1. If upload fails due to missing OAuth, mark run as “produced but not uploaded” and exit cleanly.
+1. If upload fails due to missing OAuth, mark run as "produced but not uploaded" and exit cleanly.
 1. Do not loop endlessly.
 
 Acceptance criteria
