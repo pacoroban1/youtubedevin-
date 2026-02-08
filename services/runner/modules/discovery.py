@@ -5,7 +5,7 @@ Discovers top-performing recap YouTube channels and videos.
 
 import os
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import json
@@ -34,7 +34,13 @@ class ChannelDiscovery:
         self,
         queries: List[str] = None,
         top_n: int = 10,
-        videos_per_channel: int = 5
+        videos_per_channel: int = 5,
+        # Scout tuning
+        lookback_days: int = 14,
+        max_video_age_hours: float = 72.0,
+        min_views_per_hour: float = 250.0,
+        min_views_total: int = 20000,
+        min_duration_seconds: int = 180,
     ) -> Dict[str, Any]:
         """
         Discover top recap channels using YouTube Data API.
@@ -43,6 +49,11 @@ class ChannelDiscovery:
             queries: Search queries for finding recap channels
             top_n: Number of top channels to select
             videos_per_channel: Number of videos to select per channel
+            lookback_days: Only consider videos published within this lookback window
+            max_video_age_hours: Only consider "banger" candidates within this age window
+            min_views_per_hour: Minimum views/hour to qualify as a "banger"
+            min_views_total: Minimum total views to qualify as a "banger"
+            min_duration_seconds: Filter out very short videos (e.g., Shorts)
         
         Returns:
             Dict with channels and videos data
@@ -99,7 +110,9 @@ class ChannelDiscovery:
             try:
                 videos = await self._get_channel_videos(
                     channel["channel_id"],
-                    max_results=videos_per_channel
+                    max_results=videos_per_channel,
+                    lookback_days=lookback_days,
+                    min_duration_seconds=min_duration_seconds,
                 )
                 for video in videos:
                     video["channel_id"] = channel["channel_id"]
@@ -109,20 +122,40 @@ class ChannelDiscovery:
                 print(f"Error getting videos for channel {channel['channel_id']}: {e}")
                 continue
         
-        # Sort videos by views velocity
-        all_videos.sort(key=lambda x: x.get("views_velocity", 0), reverse=True)
+        # Sort videos by "viral_score" (falls back to views velocity if missing).
+        all_videos.sort(key=lambda x: (x.get("viral_score", 0), x.get("views_velocity", 0)), reverse=True)
+
+        selected_video, selection_mode = self._select_target_video(
+            all_videos,
+            max_video_age_hours=max_video_age_hours,
+            min_views_per_hour=min_views_per_hour,
+            min_views_total=min_views_total,
+        )
         
         # Save snapshot to JSON
         snapshot = {
             "timestamp": datetime.utcnow().isoformat(),
             "channels": top_channels,
-            "videos": all_videos
+            "videos": all_videos,
+            "selected_video_id": (selected_video.get("video_id") if selected_video else None),
+            "selection_mode": selection_mode,
+            "thresholds": {
+                "lookback_days": lookback_days,
+                "max_video_age_hours": max_video_age_hours,
+                "min_views_per_hour": min_views_per_hour,
+                "min_views_total": min_views_total,
+                "min_duration_seconds": min_duration_seconds,
+            },
         }
         self._save_snapshot(snapshot)
         
         return {
             "channels": top_channels,
             "videos": all_videos,
+            "selected_video_id": (selected_video.get("video_id") if selected_video else None),
+            "selected_video": selected_video,
+            "selection_mode": selection_mode,
+            "thresholds": snapshot["thresholds"],
             "snapshot_saved": True
         }
     
@@ -284,16 +317,20 @@ class ChannelDiscovery:
     async def _get_channel_videos(
         self,
         channel_id: str,
-        max_results: int = 5
+        max_results: int = 5,
+        lookback_days: int = 14,
+        min_duration_seconds: int = 180,
     ) -> List[Dict[str, Any]]:
-        """Get top videos from a channel by views velocity."""
-        # Search for recent videos
+        """Get recent videos from a channel and rank by a "viral_score"."""
+        published_after = (datetime.utcnow() - timedelta(days=lookback_days)).replace(microsecond=0).isoformat() + "Z"
+        # Search for recent videos (we compute velocity ourselves, so prefer recency over total views).
         request = self.youtube.search().list(
             part="snippet",
             channelId=channel_id,
             type="video",
-            order="viewCount",
-            maxResults=max_results * 2  # Get more to filter
+            order="date",
+            publishedAfter=published_after,
+            maxResults=min(50, max_results * 6),
         )
         response = request.execute()
         
@@ -317,27 +354,50 @@ class ChannelDiscovery:
             # Parse duration
             duration_str = item.get("contentDetails", {}).get("duration", "PT0S")
             duration_seconds = self._parse_duration(duration_str)
-            
-            # Calculate views velocity
+
+            # Skip Shorts / very short uploads.
+            if duration_seconds and duration_seconds < min_duration_seconds:
+                continue
+
+            if snippet.get("liveBroadcastContent") not in (None, "none"):
+                continue
+
+            # Calculate views velocity (views/hour since publish, smoothed).
             published_at = snippet.get("publishedAt")
             views = int(stats.get("viewCount", 0))
             views_velocity = self._calculate_views_velocity(views, published_at)
+            age_hours = self._age_hours(published_at)
+
+            like_count = int(stats.get("likeCount", 0))
+            comment_count = int(stats.get("commentCount", 0))
+            denom = float(max(views, 1))
+            like_rate = like_count / denom
+            comment_rate = comment_count / denom
+            engagement_rate = (like_count + comment_count) / denom
+            # Lightweight engagement-adjusted velocity score (works without dislikes).
+            viral_score = views_velocity * (1.0 + 6.0 * like_rate) * (1.0 + 20.0 * comment_rate)
             
             videos.append({
                 "video_id": item["id"],
                 "title": snippet.get("title", ""),
                 "description": snippet.get("description", ""),
                 "view_count": views,
-                "like_count": int(stats.get("likeCount", 0)),
-                "comment_count": int(stats.get("commentCount", 0)),
+                "like_count": like_count,
+                "comment_count": comment_count,
                 "duration_seconds": duration_seconds,
                 "published_at": published_at,
                 "views_velocity": views_velocity,
+                "views_per_hour": views_velocity,
+                "age_hours": age_hours,
+                "like_rate": round(like_rate, 6),
+                "comment_rate": round(comment_rate, 6),
+                "engagement_rate": round(engagement_rate, 6),
+                "viral_score": round(viral_score, 4),
                 "status": "discovered"
             })
         
-        # Sort by views velocity and return top N
-        videos.sort(key=lambda x: x["views_velocity"], reverse=True)
+        # Sort by viral score (then velocity) and return top N
+        videos.sort(key=lambda x: (x.get("viral_score", 0), x.get("views_velocity", 0)), reverse=True)
         return videos[:max_results]
     
     def _parse_duration(self, duration_str: str) -> int:
@@ -357,20 +417,76 @@ class ChannelDiscovery:
         return hours * 3600 + minutes * 60 + seconds
     
     def _calculate_views_velocity(self, views: int, published_at: str) -> float:
-        """Calculate views per day since publish."""
+        """Calculate views per hour since publish (smoothed for very fresh uploads)."""
         if not published_at:
             return 0.0
         
         try:
             published = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
-            days_since = (datetime.now(published.tzinfo) - published).days
-            
-            if days_since <= 0:
-                days_since = 1
-            
-            return views / days_since
+            now = datetime.now(timezone.utc)
+            hours_since = (now - published).total_seconds() / 3600.0
+            # Smooth uploads within the last hour to 1 hour to avoid extreme spikes.
+            hours_since = max(hours_since, 1.0)
+            return views / hours_since
         except Exception:
             return 0.0
+
+    def _age_hours(self, published_at: Optional[str]) -> float:
+        """Compute age in hours (UTC)."""
+        if not published_at:
+            return 0.0
+        try:
+            published = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            return max(0.0, (now - published).total_seconds() / 3600.0)
+        except Exception:
+            return 0.0
+
+    def _select_target_video(
+        self,
+        videos: List[Dict[str, Any]],
+        max_video_age_hours: float,
+        min_views_per_hour: float,
+        min_views_total: int,
+        fallback_window_hours: float = 24.0,
+    ):
+        """
+        "Taste layer" selector:
+          - Prefer candidates that look viral (views/hour + minimum total views + age window)
+          - If none qualify, fall back to highest total views in the last 24h
+          - Final fallback: highest viral_score overall
+        """
+        if not videos:
+            return None, "none"
+
+        # Only consider reasonably recent videos for selection.
+        recent = [v for v in videos if float(v.get("age_hours") or 0.0) <= float(max_video_age_hours)]
+
+        for v in recent:
+            vph = float(v.get("views_per_hour") or v.get("views_velocity") or 0.0)
+            views = int(v.get("view_count") or 0)
+            age_h = float(v.get("age_hours") or 0.0)
+            v["banger"] = bool(age_h <= max_video_age_hours and vph >= min_views_per_hour and views >= min_views_total)
+
+        bangers = [v for v in recent if v.get("banger")]
+        if bangers:
+            chosen = max(bangers, key=lambda v: float(v.get("viral_score") or 0.0))
+            return chosen, "banger"
+
+        # Fallback: pick the most viewed video in the last 24h.
+        last_day = [v for v in recent if float(v.get("age_hours") or 0.0) <= float(fallback_window_hours)]
+        if last_day:
+            chosen = max(last_day, key=lambda v: (int(v.get("view_count") or 0), float(v.get("viral_score") or 0.0)))
+            return chosen, "fallback_24h_highest_views"
+
+        # Final fallback: best score among recent.
+        if recent:
+            chosen = max(recent, key=lambda v: float(v.get("viral_score") or 0.0))
+            return chosen, "fallback_best_score"
+
+        # If everything is older than the max window, still pick something rather than returning nothing.
+        chosen = max(videos, key=lambda v: float(v.get("viral_score") or 0.0))
+        return chosen, "fallback_any"
     
     def _save_snapshot(self, snapshot: Dict[str, Any]):
         """Save discovery snapshot to JSON file."""

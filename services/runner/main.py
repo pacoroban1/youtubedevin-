@@ -134,11 +134,21 @@ class FullPipelineRequest(BaseModel):
     queries: Optional[List[str]] = None
     top_n_channels: int = 10
     videos_per_channel: int = 5
+    lookback_days: int = 14
+    max_video_age_hours: float = 72.0
+    min_views_per_hour: float = 250.0
+    min_views_total: int = 20000
+    min_duration_seconds: int = 180
 
 class DiscoverRequest(BaseModel):
     queries: Optional[List[str]] = None
     top_n_channels: int = 10
     videos_per_channel: int = 5
+    lookback_days: int = 14
+    max_video_age_hours: float = 72.0
+    min_views_per_hour: float = 250.0
+    min_views_total: int = 20000
+    min_duration_seconds: int = 180
 
 class TranslateRequest(BaseModel):
     text: str
@@ -211,8 +221,15 @@ async def _run_pipeline_full_job(job_id: str, request: FullPipelineRequest) -> N
                 queries=request.queries,
                 top_n=request.top_n_channels,
                 videos_per_channel=request.videos_per_channel,
+                lookback_days=request.lookback_days,
+                max_video_age_hours=request.max_video_age_hours,
+                min_views_per_hour=request.min_views_per_hour,
+                min_views_total=request.min_views_total,
+                min_duration_seconds=request.min_duration_seconds,
             )
-            if discovery_result.get("videos"):
+            if discovery_result.get("selected_video_id"):
+                video_id = discovery_result["selected_video_id"]
+            elif discovery_result.get("videos"):
                 video_id = discovery_result["videos"][0]["video_id"]
             
             if not video_id:
@@ -466,8 +483,15 @@ async def run_pipeline_full(request: FullPipelineRequest, http_request: Request)
                 queries=request.queries,
                 top_n=request.top_n_channels,
                 videos_per_channel=request.videos_per_channel,
+                lookback_days=request.lookback_days,
+                max_video_age_hours=request.max_video_age_hours,
+                min_views_per_hour=request.min_views_per_hour,
+                min_views_total=request.min_views_total,
+                min_duration_seconds=request.min_duration_seconds,
             )
-            if (results["discover"] or {}).get("videos"):
+            if (results["discover"] or {}).get("selected_video_id"):
+                video_id = results["discover"]["selected_video_id"]
+            elif (results["discover"] or {}).get("videos"):
                 video_id = results["discover"]["videos"][0]["video_id"]
         if not video_id:
             return _json(http_request, 400, {"status": "error", "error": "missing_video_id", "message": "video_id required (or set auto_select=true)"})
@@ -517,6 +541,11 @@ async def discover(request: Request, body: Optional[DiscoverRequest] = None):
         queries=(body.queries if body else None),
         top_n=(body.top_n_channels if body else 10),
         videos_per_channel=(body.videos_per_channel if body else 5),
+        lookback_days=(body.lookback_days if body else 14),
+        max_video_age_hours=(body.max_video_age_hours if body else 72.0),
+        min_views_per_hour=(body.min_views_per_hour if body else 250.0),
+        min_views_total=(body.min_views_total if body else 20000),
+        min_duration_seconds=(body.min_duration_seconds if body else 180),
     )
     # discovery may return {"error": "..."} if not configured; keep JSON always.
     status = "success" if not out.get("error") else "error"
