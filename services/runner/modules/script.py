@@ -44,6 +44,11 @@ class ScriptGenerator:
         self.max_beats = int(os.getenv("SCRIPT_MAX_BEATS") or "60")
         self.quality_min = float(os.getenv("SCRIPT_QUALITY_MIN") or "0.85")
         self.max_attempts = int(os.getenv("SCRIPT_MAX_ATTEMPTS") or "2")
+        # "Let the movie breathe" moments: short windows where original audio is allowed to come through.
+        # These are inferred from beat timing, and used during render mixing.
+        self.orig_audio_window_count = int(os.getenv("ORIG_AUDIO_WINDOW_COUNT") or "4")
+        self.orig_audio_window_seconds = float(os.getenv("ORIG_AUDIO_WINDOW_SECONDS") or "2.8")
+        self.orig_audio_fade_seconds = float(os.getenv("ORIG_AUDIO_FADE_SECONDS") or "0.25")
 
     async def generate_full_script(self, video_id: str) -> Dict[str, Any]:
         """Generates a full structured script for the video."""
@@ -131,6 +136,7 @@ Output JSON format matches this schema:
 
                 structured = self._normalize_structured_script(script_obj)
                 legacy = self._structured_to_legacy_fields(structured)
+                structured["original_audio_windows"] = self._infer_original_audio_windows(structured)
 
                 # Basic validity/quality heuristics (cheap, local).
                 q = float(structured.get("quality_score") or 0.0)
@@ -250,6 +256,98 @@ Output JSON format matches this schema:
             "quality_score": quality,
         }
 
+    def _infer_original_audio_windows(self, structured: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Infer short windows where we intentionally let the source video's original audio
+        come through (smooth in/out). This mimics common recap pacing:
+        mostly narration, occasional cast/ambience moments.
+        """
+        try:
+            count = int(self.orig_audio_window_count or 0)
+        except Exception:
+            count = 0
+        if count <= 0:
+            return []
+
+        beats = structured.get("beats") or []
+        if not isinstance(beats, list) or not beats:
+            return []
+
+        # Only consider beats with valid timing.
+        idxs: List[int] = []
+        for i, b in enumerate(beats):
+            if not isinstance(b, dict):
+                continue
+            s = b.get("start_time")
+            e = b.get("end_time")
+            if s is None or e is None:
+                continue
+            try:
+                sf = float(s)
+                ef = float(e)
+            except Exception:
+                continue
+            if ef > sf:
+                idxs.append(i)
+
+        if not idxs:
+            return []
+
+        # Avoid the very first beat by preference (keep hook/narration clean).
+        candidates = idxs[1:] if len(idxs) > 1 else idxs[:]
+
+        # Pick roughly evenly spaced beats.
+        step = max(1, int(len(candidates) / max(1, count)))
+        picked = candidates[::step][:count]
+
+        windows: List[Dict[str, Any]] = []
+        for i in picked:
+            b = beats[i] or {}
+            try:
+                s = float(b.get("start_time") or 0.0)
+                e = float(b.get("end_time") or 0.0)
+            except Exception:
+                continue
+            if e <= s:
+                continue
+
+            beat_dur = e - s
+            # Keep window short and inside the beat, near the end (natural pause point).
+            w = float(self.orig_audio_window_seconds or 2.8)
+            w = max(1.2, min(w, max(1.2, beat_dur * 0.35)))
+            end_t = e
+            start_t = max(s, end_t - w)
+
+            label = str((b.get("on_screen_text") or "").strip() or f"Beat {i+1}")
+            windows.append(
+                {
+                    "start_time": round(start_t, 3),
+                    "end_time": round(end_t, 3),
+                    "fade_seconds": round(max(0.05, float(self.orig_audio_fade_seconds or 0.25)), 3),
+                    "label": self._short_title(label, max_len=32) or f"Beat {i+1}",
+                }
+            )
+
+        # Sort + drop overlaps (keep first occurrences).
+        windows.sort(key=lambda w: float(w.get("start_time") or 0.0))
+        out: List[Dict[str, Any]] = []
+        last_end = -1.0
+        for w in windows:
+            try:
+                st = float(w.get("start_time") or 0.0)
+                en = float(w.get("end_time") or 0.0)
+            except Exception:
+                continue
+            if en <= st:
+                continue
+            if st < last_end + 0.05:
+                # Too close/overlapping; skip to avoid weird audio pumping.
+                continue
+            out.append(w)
+            last_end = en
+
+        return out
+
     def _structured_to_legacy_fields(self, structured: Dict[str, Any]) -> Dict[str, Any]:
         """Convert the structured script into legacy DB/API fields used by other modules."""
         hook_text = str(structured.get("hook") or "").strip()
@@ -296,6 +394,7 @@ Output JSON format matches this schema:
         segments = legacy.get("main_recap_segments") or []
         payoff = str(structured.get("payoff") or "").strip()
         cta = str(structured.get("cta") or "").strip()
+        windows = structured.get("original_audio_windows") or []
 
         # Chapters derived from estimated durations (hook fixed at 15s).
         hook_seconds = 15.0
@@ -322,6 +421,16 @@ Output JSON format matches this schema:
         for i, seg in enumerate(segments):
             md.append(f"### Beat {i+1}")
             md.append(str((seg or {}).get("text") or "(empty)").strip())
+            md.append("")
+        if isinstance(windows, list) and windows:
+            md.append("## Original Audio Windows (Smooth In/Out)")
+            for w in windows:
+                if not isinstance(w, dict):
+                    continue
+                st = self._fmt_ts(float(w.get("start_time") or 0.0))
+                en = self._fmt_ts(float(w.get("end_time") or 0.0))
+                label = str(w.get("label") or "").strip()
+                md.append(f"- {st} → {en}: {label}")
             md.append("")
         md.append("## Payoff")
         md.append(payoff or "(empty)")
