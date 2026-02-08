@@ -1,9 +1,11 @@
+from decimal import Decimal
 """
 Amharic Recap Autopilot - Runner Service
 Main FastAPI application that orchestrates the video recap pipeline.
 """
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.encoders import jsonable_encoder
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List
@@ -528,10 +530,10 @@ async def get_daily_report():
     """
     try:
         report = await growth.generate_daily_report()
-        return {
+        return jsonable_encoder({
             "status": "success",
             "report": report
-        }
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

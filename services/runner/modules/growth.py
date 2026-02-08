@@ -3,12 +3,14 @@ Part H: Growth Loop Module
 Handles distribution, A/B testing, metrics tracking, and daily reports.
 """
 
+from decimal import Decimal
 import os
 import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy import text
 import httpx
+from fastapi.encoders import jsonable_encoder
 
 
 class GrowthLoop:
@@ -426,7 +428,7 @@ class GrowthLoop:
                 "views": total_views,
                 "ctr": avg_ctr,
                 "retention": avg_retention,
-                "json": json.dumps(report),
+                "json": json.dumps(report, default=float),
                 "markdown": markdown_report
             })
             session.commit()
@@ -440,6 +442,9 @@ class GrowthLoop:
         
         with open(os.path.join(reports_dir, f"report_{today}.md"), "w") as f:
             f.write(markdown_report)
+        
+        report = jsonable_encoder(report)
+
         
         return report
     
