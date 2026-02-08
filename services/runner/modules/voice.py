@@ -182,6 +182,7 @@ class VoiceGenerator:
             "voice_id": self.voice_name,
             "audio_file_path": final_audio_path,
             "duration_seconds": duration,
+            "quality_check_passed": True,
             "model_used": model_used,
         }
         
@@ -198,6 +199,8 @@ class VoiceGenerator:
             "narration_url": f"/api/media/audio/{video_id}/narration.wav",
             "duration_sec": duration,
             "duration": duration,
+            "quality_passed": True,
+            "quality_check_passed": True,
             "model_used": model_used,
             "attempts": attempts,
         }

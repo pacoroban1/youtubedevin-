@@ -19,7 +19,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://runner:8000/api/script/full/{{$json["body"]["video_id"]}}",
+        "url": "http://runner:8000/api/script/full/{{ $json.body.video_id }}",
         "authentication": "none",
         "options": {}
       },
@@ -34,7 +34,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://runner:8000/api/tts/{{$json["body"]["video_id"]}}",
+        "url": "http://runner:8000/api/tts/{{ $json.body.video_id }}",
         "authentication": "none",
         "options": {}
       },
@@ -49,7 +49,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://runner:8000/api/thumbnail/{{$json["body"]["video_id"]}}",
+        "url": "http://runner:8000/api/thumbnail/{{ $json.body.video_id }}",
         "authentication": "none",
         "options": {}
       },

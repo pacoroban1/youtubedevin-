@@ -6,6 +6,7 @@ Generates high-retention Amharic recap scripts using Gemini.
 import os
 import json
 import logging
+import re
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
@@ -37,6 +38,7 @@ class FullScript(BaseModel):
 class ScriptGenerator:
     def __init__(self, db):
         self.db = db
+        self.media_dir = os.getenv("MEDIA_DIR", "/app/media")
         self.narrator_persona = (os.getenv("NARRATOR_PERSONA") or "futuristic captain").strip()
         self.beat_seconds = int(os.getenv("SCRIPT_BEAT_SECONDS") or "20")
         self.max_beats = int(os.getenv("SCRIPT_MAX_BEATS") or "60")
@@ -70,6 +72,7 @@ Requirements:
    - Narration: The Amharic voiceover (engaging, not literal translation).
    - Visual Prompt: Description for a thumbnail/scene generator (in English).
    - On Screen Text: Short Amharic text to show on screen (optional).
+   - Timing: start_time/end_time in seconds, strictly increasing, covering the recap after the hook.
 3. PAYOFF: Satisfying conclusion.
 4. CTA: Call to action (Subscribe/Like).
 
@@ -100,22 +103,37 @@ Output JSON format matches this schema:
             if not script_obj:
                 raise RuntimeError("Empty response from Gemini")
             
-            # Convert Pydantic model to dict if needed, or if generate_json returned a dict/object
-            # generate_json returns the Pydantic instance if schema is provided
+            # The Gemini client returns parsed JSON (dict/list). Coerce into a dict and
+            # normalize keys to what downstream modules + DB schema expect.
             if isinstance(script_obj, BaseModel):
-                script_data = script_obj.model_dump()
-            else:
-                script_data = script_obj
+                script_obj = script_obj.model_dump()
+            if isinstance(script_obj, str):
+                script_obj = json.loads(script_obj)
+            if not isinstance(script_obj, dict):
+                raise RuntimeError(f"unexpected_script_type:{type(script_obj)}")
 
-            # Legacy compatibility: VoiceGenerator expects "full_script" key
-            # We store the structured data as a JSON string in this key
-            script_data["full_script"] = json.dumps(script_data)
+            structured = self._normalize_structured_script(script_obj)
+            legacy = self._structured_to_legacy_fields(structured)
 
-            # Save to DB
-            self.db.save_script(video_id, script_data)
+            # Persist (DB schema expects legacy fields; also store full structured JSON).
+            db_record = {
+                **legacy,
+                "full_script": json.dumps(structured, ensure_ascii=False),
+                "quality_score": float(structured.get("quality_score") or 0.0),
+            }
+            script_id = self.db.save_script(video_id, db_record)
+            if script_id == -1:
+                raise RuntimeError("db_save_script_failed")
             self.db.update_video_status(video_id, "scripted")
-            
-            return script_data
+
+            # Write a timestamped recap markdown artifact (best-effort; never fail script generation).
+            recap = {}
+            try:
+                recap = self._write_recap_markdown(video_id, structured, legacy)
+            except Exception:
+                recap = {}
+
+            return {**structured, **legacy, **recap, "full_script": db_record["full_script"], "script_id": script_id}
 
         except Exception as e:
             logger.error(f"Full script generation failed: {e}")
@@ -139,3 +157,175 @@ Output JSON format matches this schema:
         # Simple implementation using text generation
         prompt = f"Compress this Amharic text to be spoken in {target_duration} seconds:\n{script}"
         return gemini.generate_text(prompt)
+
+    def _normalize_structured_script(self, obj: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize/clean the model output into a stable structured schema."""
+        hook = str(obj.get("hook") or "").strip()
+        payoff = str(obj.get("payoff") or "").strip()
+        cta = str(obj.get("cta") or "").strip()
+        language = (obj.get("language") or "am") if isinstance(obj.get("language"), str) else "am"
+        persona = str(obj.get("persona") or self.narrator_persona).strip()
+
+        beats_in = obj.get("beats") or []
+        if not isinstance(beats_in, list):
+            beats_in = []
+
+        beats_out: List[Dict[str, Any]] = []
+        for b in beats_in[: self.max_beats]:
+            if not isinstance(b, dict):
+                continue
+            start = self._coerce_float(b.get("start_time"), default=None)
+            end = self._coerce_float(b.get("end_time"), default=None)
+            narration = str(b.get("narration_text") or "").strip()
+            visual = str(b.get("visual_prompt") or "").strip()
+            on_screen = str(b.get("on_screen_text") or "").strip()
+            beats_out.append(
+                {
+                    "start_time": start,
+                    "end_time": end,
+                    "narration_text": narration,
+                    "visual_prompt": visual,
+                    "on_screen_text": on_screen,
+                }
+            )
+
+        quality = self._coerce_float(obj.get("quality_score"), default=0.8)
+        # Keep in [0,1] range; some prompts might return 95.
+        if quality > 1.0:
+            quality = quality / 100.0
+        quality = max(0.0, min(1.0, quality))
+
+        return {
+            "hook": hook,
+            "beats": beats_out,
+            "payoff": payoff,
+            "cta": cta,
+            "language": language,
+            "persona": persona,
+            "quality_score": quality,
+        }
+
+    def _structured_to_legacy_fields(self, structured: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert the structured script into legacy DB/API fields used by other modules."""
+        hook_text = str(structured.get("hook") or "").strip()
+        payoff_text = str(structured.get("payoff") or "").strip()
+        cta_text = str(structured.get("cta") or "").strip()
+
+        segments: List[Dict[str, Any]] = []
+        beats = structured.get("beats") or []
+        if isinstance(beats, list):
+            for beat in beats:
+                if not isinstance(beat, dict):
+                    continue
+                start = self._coerce_float(beat.get("start_time"), default=None)
+                end = self._coerce_float(beat.get("end_time"), default=None)
+                est = None
+                if start is not None and end is not None and end >= start:
+                    est = float(end - start)
+                if est is None:
+                    est = float(self.beat_seconds)
+                segments.append(
+                    {
+                        "text": str(beat.get("narration_text") or "").strip(),
+                        "visual_prompt": str(beat.get("visual_prompt") or "").strip(),
+                        "on_screen_text": str(beat.get("on_screen_text") or "").strip(),
+                        "estimated_duration": est,
+                        "start_time": start,
+                        "end_time": end,
+                    }
+                )
+
+        return {
+            "hook_text": hook_text,
+            "main_recap_segments": segments,
+            "payoff_text": payoff_text,
+            "cta_text": cta_text,
+        }
+
+    def _write_recap_markdown(self, video_id: str, structured: Dict[str, Any], legacy: Dict[str, Any]) -> Dict[str, Any]:
+        out_dir = os.path.join(self.media_dir, "output", video_id)
+        os.makedirs(out_dir, exist_ok=True)
+        md_path = os.path.join(out_dir, "recap.md")
+
+        hook = str(structured.get("hook") or "").strip()
+        segments = legacy.get("main_recap_segments") or []
+        payoff = str(structured.get("payoff") or "").strip()
+        cta = str(structured.get("cta") or "").strip()
+
+        # Chapters derived from estimated durations (hook fixed at 15s).
+        hook_seconds = 15.0
+        t = hook_seconds
+        chapter_lines = [f"{self._fmt_ts(0)} - መግቢያ"]
+        for i, seg in enumerate(segments):
+            title = self._chapter_title_from_segment(seg, i + 1)
+            chapter_lines.append(f"{self._fmt_ts(t)} - {title}")
+            dur = self._coerce_float((seg or {}).get("estimated_duration"), default=float(self.beat_seconds))
+            t += max(1.0, dur)
+        if payoff or cta:
+            chapter_lines.append(f"{self._fmt_ts(t)} - መደምደሚያ")
+
+        md: List[str] = []
+        md.append(f"# Timestamped Recap ({video_id})")
+        md.append("")
+        md.append("## Chapters")
+        md.extend([f"- {line}" for line in chapter_lines])
+        md.append("")
+        md.append("## Hook")
+        md.append(hook or "(empty)")
+        md.append("")
+        md.append("## Beats")
+        for i, seg in enumerate(segments):
+            md.append(f"### Beat {i+1}")
+            md.append(str((seg or {}).get("text") or "(empty)").strip())
+            md.append("")
+        md.append("## Payoff")
+        md.append(payoff or "(empty)")
+        md.append("")
+        md.append("## CTA")
+        md.append(cta or "(empty)")
+        md.append("")
+
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(md).strip() + "\n")
+
+        return {
+            "recap_markdown_path": md_path,
+            "recap_markdown_url": f"/api/media/output/{video_id}/recap.md",
+        }
+
+    def _chapter_title_from_segment(self, seg: Dict[str, Any], idx: int) -> str:
+        on_screen = str((seg or {}).get("on_screen_text") or "").strip()
+        if on_screen:
+            return self._short_title(on_screen)
+        text = str((seg or {}).get("text") or "").strip()
+        if text:
+            return self._short_title(text)
+        return f"ክፍል {idx}"
+
+    def _short_title(self, s: str, *, max_len: int = 28) -> str:
+        s = re.sub(r"\s+", " ", s or "").strip()
+        if not s:
+            return ""
+        # Strip obvious punctuation; keep Ethiopic/latin/numbers.
+        s = re.sub(r"[\\[\\]{}()<>\"“”'`]", "", s)
+        s = re.sub(r"[,:;!?]+", "", s).strip()
+        if len(s) <= max_len:
+            return s
+        return s[: max_len - 3].rstrip() + "..."
+
+    def _fmt_ts(self, seconds: float) -> str:
+        try:
+            s = int(max(0, seconds))
+        except Exception:
+            s = 0
+        m = s // 60
+        sec = s % 60
+        return f"{m}:{sec:02d}"
+
+    def _coerce_float(self, v: Any, *, default: Optional[float]) -> Optional[float]:
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except Exception:
+            return default

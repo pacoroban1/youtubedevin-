@@ -9,7 +9,7 @@ The system consists of 8 main modules orchestrated by n8n workflows:
 1. **Channel Discovery (Part A)** - Finds top-performing recap channels using YouTube Data API
 2. **Video Ingest (Part B)** - Downloads videos and extracts/generates transcripts
 3. **Script Generation (Part C)** - Creates high-retention Amharic recap scripts via Gemini
-4. **Voice Generation (Part D)** - Generates Amharic narration using Azure TTS (am-ET-AmehaNeural)
+4. **Voice Generation (Part D)** - Generates Amharic narration using Gemini TTS models
 5. **Timing & Scene Match (Part E)** - Aligns narration to video scenes with forced alignment
 6. **Thumbnail Generation (Part F)** - Creates thumbnails with Amharic hooks
 7. **YouTube Upload (Part G)** - Uploads with optimized metadata, chapters, and playlists
@@ -20,7 +20,7 @@ The system consists of 8 main modules orchestrated by n8n workflows:
 ### Prerequisites
 
 - Docker and Docker Compose
-- API keys for: YouTube Data API, Azure Speech Services, Google Gemini
+- API keys for: YouTube Data API, Google Gemini
 
 ### Setup
 
@@ -52,8 +52,8 @@ See `.env.example` for all required variables:
 | `YOUTUBE_CLIENT_ID` | YouTube OAuth client ID |
 | `YOUTUBE_CLIENT_SECRET` | YouTube OAuth client secret |
 | `YOUTUBE_REFRESH_TOKEN` | YouTube OAuth refresh token |
-| `AZURE_SPEECH_KEY` | Azure Cognitive Services Speech key |
-| `AZURE_SPEECH_REGION` | Azure region (e.g., eastus) |
+| `AZURE_SPEECH_KEY` | (Legacy) Azure Speech key (not used in Gemini-only TTS) |
+| `AZURE_SPEECH_REGION` | (Legacy) Azure region |
 | `GEMINI_API_KEY` | Google AI Studio API key |
 | `POSTGRES_*` | PostgreSQL connection settings |
 | `TELEGRAM_BOT_TOKEN` | (Optional) Telegram bot token for distribution |
@@ -124,14 +124,7 @@ PostgreSQL stores all pipeline data across 12 tables:
 
 ## TTS Voice Configuration
 
-The system uses Microsoft Azure TTS with Amharic support:
-
-- **Voice**: am-ET-AmehaNeural (male, deep narrator style)
-- **Rate**: -5% (slightly slower for clarity)
-- **Pitch**: -10% (deeper tone)
-- **Loudness**: Normalized to -14 LUFS (YouTube standard)
-
-Alternative voice: am-ET-MekdesNeural (female)
+The system uses Gemini TTS (see `services/runner/modules/voice.py`).
 
 ## Development
 
@@ -151,11 +144,11 @@ curl -X POST http://localhost:8000/api/ingest/VIDEO_ID
 ### Testing
 
 ```bash
-# Run tests (recommended)
-make test
+# Fast verifiers (syntax + workflow JSON)
+make verify
 
-# Or run directly inside the runner container
-docker-compose exec runner python -m unittest discover -s tests -p 'test_*.py'
+# Smoke test (starts docker + checks runner health)
+make smoke
 ```
 
 ## ZThumb LoRA Fine-Tune (GPU)

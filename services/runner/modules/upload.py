@@ -14,6 +14,9 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 import pickle
 
+from sqlalchemy import text
+
+from modules.gemini_client import gemini
 
 class YouTubeUploader:
     def __init__(self, db):
@@ -114,13 +117,12 @@ class YouTubeUploader:
         
         # Upload thumbnail
         thumb_dir = os.path.join(self.media_dir, "thumbnails", video_id)
-        thumbnail_uploaded = await self._upload_thumbnail(youtube_video_id, thumb_dir)
+        thumbnail_uploaded = await self._upload_thumbnail(youtube_video_id, video_id, thumb_dir)
         
         # Add to playlist
         playlist_id = await self._add_to_playlist(youtube_video_id)
         
         # Save upload record
-        from sqlalchemy import text
         with self.db.get_session() as session:
             # Get render and thumbnail IDs
             render_result = session.execute(text("""
@@ -177,17 +179,10 @@ class YouTubeUploader:
         script_data: Optional[Dict]
     ) -> List[str]:
         """Generate 3 title candidates in Amharic."""
-        gemini_key = os.getenv("GEMINI_API_KEY")
-        
-        if not gemini_key:
+        if not gemini.is_configured():
             return self._fallback_titles()
         
         try:
-            import google.generativeai as genai
-            
-            genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            
             original_title = video_data.get("title", "") if video_data else ""
             hook = script_data.get("hook_text", "") if script_data else ""
             
@@ -204,9 +199,8 @@ Requirements:
 5. Include relevant keywords
 
 Return ONLY 3 titles, one per line, nothing else."""
-
-            response = model.generate_content(prompt)
-            titles = response.text.strip().split('\n')
+            response_text = gemini.generate_text(prompt, temperature=0.7)
+            titles = response_text.strip().split('\n')
             titles = [t.strip() for t in titles if t.strip()]
             
             return titles[:3] if titles else self._fallback_titles()
@@ -229,23 +223,16 @@ Return ONLY 3 titles, one per line, nothing else."""
         script_data: Optional[Dict]
     ) -> str:
         """Generate video description in Amharic."""
-        gemini_key = os.getenv("GEMINI_API_KEY")
-        
         base_description = """🎬 ፊልም ሪካፕ በአማርኛ
 
 ይህን ቻናል ሰብስክራይብ ያድርጉ ለተጨማሪ ፊልም ሪካፕ!
 
 #ፊልም #ሪካፕ #አማርኛ #MovieRecap #Ethiopian"""
 
-        if not gemini_key:
+        if not gemini.is_configured():
             return base_description
         
         try:
-            import google.generativeai as genai
-            
-            genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            
             original_title = video_data.get("title", "") if video_data else ""
             hook = script_data.get("hook_text", "") if script_data else ""
             
@@ -262,9 +249,8 @@ Requirements:
 5. Keep professional but engaging
 
 Write the description, nothing else."""
-
-            response = model.generate_content(prompt)
-            return response.text.strip()
+            response_text = gemini.generate_text(prompt, temperature=0.7)
+            return response_text.strip()
             
         except Exception as e:
             print(f"Description generation error: {e}")
@@ -390,13 +376,37 @@ Write the description, nothing else."""
             print(f"YouTube upload error: {e}")
             return None
     
-    async def _upload_thumbnail(
-        self,
-        youtube_video_id: str,
-        thumb_dir: str
-    ) -> bool:
+    async def _upload_thumbnail(self, youtube_video_id: str, video_id: str, thumb_dir: str) -> bool:
         """Upload thumbnail to YouTube video."""
         try:
+            # Prefer the selected thumbnail from the DB if present.
+            selected_path = None
+            try:
+                with self.db.get_session() as session:
+                    row = session.execute(
+                        text(
+                            """
+                            SELECT thumbnail_path
+                            FROM thumbnails
+                            WHERE video_id = :video_id AND is_selected = TRUE
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                            """
+                        ),
+                        {"video_id": video_id},
+                    ).fetchone()
+                if row and row[0]:
+                    selected_path = str(row[0])
+            except Exception:
+                selected_path = None
+
+            if selected_path and os.path.exists(selected_path):
+                self.youtube.thumbnails().set(
+                    videoId=youtube_video_id,
+                    media_body=MediaFileUpload(selected_path, mimetype="image/png"),
+                ).execute()
+                return True
+
             # Find selected thumbnail
             for filename in os.listdir(thumb_dir) if os.path.exists(thumb_dir) else []:
                 if filename.endswith(".png"):

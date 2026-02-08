@@ -101,6 +101,7 @@ class GrowthLoop:
         
         return {
             "platforms": platforms_posted,
+            "distributed_to": platforms_posted,
             "youtube_url": youtube_url,
             "metrics": early_metrics,
             "suggestions": suggestions

@@ -145,6 +145,11 @@ class GeminiClient:
         "gemini-2.0-flash-exp-image-generation",
         "imagen-4.0-ultra-generate-001",
     ]
+    AUDIO_TRANSCRIBE_MODELS = [
+        # Multimodal text models (audio-in -> text-out).
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+    ]
 
     def __init__(self):
         # Cache clients by (api_key, timeout) to avoid rebuilding for each call.
@@ -487,5 +492,111 @@ class GeminiClient:
 
         return None
 
+    def transcribe_audio_with_fallback(
+        self,
+        audio_path: str,
+        *,
+        prompt: Optional[str] = None,
+        timeout_s: float = 180.0,
+        retries_per_model: int = 1,
+        models: Optional[List[str]] = None,
+    ) -> Tuple[str, str, List[Dict[str, Any]]]:
+        """
+        Transcribe an audio file using a multimodal Gemini model.
+
+        Uses the Files API to avoid loading large audio into memory.
+        Returns: (text, model_used, attempts)
+        """
+        if not audio_path:
+            raise ValueError("audio_path required")
+
+        models_to_try = models or list(self.AUDIO_TRANSCRIBE_MODELS)
+        attempts: List[GeminiAttempt] = []
+
+        instruction = (
+            prompt
+            or "Transcribe this audio. Return only the transcript text. "
+            "Add coarse timestamps like [MM:SS] at major topic/scene changes."
+        )
+
+        mime_type = _guess_audio_mime_type(audio_path)
+
+        for model_name in models_to_try:
+            for i in range(retries_per_model + 1):
+                client = None
+                uploaded_name = None
+                try:
+                    client = self._client(timeout_s=timeout_s)
+                    uploaded = client.files.upload(file=audio_path)
+                    uploaded_name = getattr(uploaded, "name", None)
+
+                    # Some uploads may be in PROCESSING state briefly.
+                    try:
+                        for _ in range(30):
+                            state = getattr(uploaded, "state", None)
+                            if state == types.FileState.ACTIVE:
+                                break
+                            if state == types.FileState.FAILED:
+                                raise RuntimeError("uploaded_file_failed")
+                            if uploaded_name:
+                                uploaded = client.files.get(name=uploaded_name)
+                            time.sleep(1)
+                    except Exception:
+                        # Best-effort; continue to generation attempt.
+                        pass
+
+                    uri = getattr(uploaded, "uri", None)
+                    mt = getattr(uploaded, "mime_type", None) or mime_type
+                    if not uri:
+                        raise RuntimeError("uploaded_file_missing_uri")
+
+                    part = types.Part.from_uri(file_uri=str(uri), mime_type=str(mt))
+                    cfg = types.GenerateContentConfig(temperature=0.0)
+                    resp = client.models.generate_content(
+                        model=model_name,
+                        contents=[instruction, part],
+                        config=cfg,
+                    )
+                    text = (getattr(resp, "text", None) or "").strip()
+                    if not text:
+                        raise RuntimeError("empty_transcript")
+                    return text, model_name, [a.as_dict() for a in attempts]
+                except Exception as e:
+                    attempts.append(
+                        GeminiAttempt(
+                            model=model_name,
+                            operation="transcribe_audio",
+                            code=_extract_status_code(e),
+                            message_sanitized=_sanitize_message(e),
+                        )
+                    )
+                    if i >= retries_per_model:
+                        break
+                    time.sleep(2 ** i)
+                finally:
+                    # Avoid leaking uploaded files on the user's account.
+                    try:
+                        if client is not None and uploaded_name:
+                            client.files.delete(name=str(uploaded_name))
+                    except Exception:
+                        pass
+
+        raise GeminiCallFailed("transcribe_audio", attempts)
+
 
 gemini = GeminiClient()
+
+
+def _guess_audio_mime_type(path: str) -> str:
+    p = (path or "").lower()
+    if p.endswith(".wav"):
+        return "audio/wav"
+    if p.endswith(".mp3"):
+        return "audio/mpeg"
+    if p.endswith(".m4a"):
+        return "audio/mp4"
+    if p.endswith(".aac"):
+        return "audio/aac"
+    if p.endswith(".ogg") or p.endswith(".oga"):
+        return "audio/ogg"
+    return "application/octet-stream"

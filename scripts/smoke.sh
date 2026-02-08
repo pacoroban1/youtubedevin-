@@ -31,7 +31,6 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
-ZTHUMB_URL="${ZTHUMB_URL:-http://localhost:8100}"
 RUNNER_URL="${RUNNER_URL:-http://localhost:8000}"
 
 echo "[1/5] Starting main stack (runner/n8n/postgres)..."
@@ -46,59 +45,34 @@ for i in $(seq 1 60); do
 done
 curl -fsS "${RUNNER_URL}/health" | python3 -m json.tool
 
-echo "[3/5] Ensuring ZThumb is running at ${ZTHUMB_URL} ..."
-if ! curl -fsS "${ZTHUMB_URL}/health" >/dev/null 2>&1; then
-  echo "ZThumb not healthy yet; starting via ./zthumb/run_zthumb.sh"
-  (cd zthumb && ./run_zthumb.sh)
-fi
-curl -fsS "${ZTHUMB_URL}/health" | python3 -m json.tool
+echo "[3/5] Runner Gemini voice verification gate..."
+VOICE_TMP="$(mktemp -t voice_verify.XXXXXX.json)"
+curl -fsS "${RUNNER_URL}/api/verify/voice" > "${VOICE_TMP}"
 
-echo "[4/5] ZThumb generate test (1 image)..."
-GEN_TMP="$(mktemp -t zthumb_gen.XXXXXX.json)"
-curl -fsS -X POST "${ZTHUMB_URL}/generate" \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"cinematic alien creature reveal, ultra high contrast, thumbnail composition","batch":1,"style_preset":"alien_reveal"}' \
-  > "${GEN_TMP}"
-
-python3 - "${GEN_TMP}" <<'PY'
+python3 - "${VOICE_TMP}" <<'PY'
 import json, sys
 path = sys.argv[1]
 data = json.load(open(path, "r", encoding="utf-8"))
-imgs = data.get("images") or []
-warn = data.get("warnings") or []
-if warn:
-  print("WARN: ZThumb warnings:", warn)
-if not imgs:
-  print("ERROR: ZThumb returned no images")
-  sys.exit(1)
-print("OK: ZThumb returned", len(imgs), "image(s)")
-print("First:", imgs[0])
+ok = data.get("status") == "success" and bool(data.get("gemini_configured"))
+if not ok:
+  raise SystemExit(f"ERROR: Gemini voice verify failed: {data}")
+print("OK: Gemini TTS configured")
 PY
 
-if [ -z "${AZURE_SPEECH_KEY:-}" ]; then
-  echo "[5/5] Runner voice verification gate... SKIP (AZURE_SPEECH_KEY not set)"
-else
-  echo "[5/5] Runner voice verification gate..."
-  VOICE_TMP="$(mktemp -t voice_verify.XXXXXX.json)"
-  curl -fsS "${RUNNER_URL}/api/verify/voice" > "${VOICE_TMP}"
-
-  python3 - "${VOICE_TMP}" <<'PY'
+echo "[4/5] Runner config summary (non-secret)..."
+CONF_TMP="$(mktemp -t runner_config.XXXXXX.json)"
+curl -fsS "${RUNNER_URL}/api/config" > "${CONF_TMP}"
+python3 - "${CONF_TMP}" <<'PY'
 import json, sys
-path = sys.argv[1]
-data = json.load(open(path, "r", encoding="utf-8"))
-v = (data.get("verification") or {}).get("azure_tts") or {}
-supported = bool(v.get("supported"))
-test = bool(v.get("test_synthesis"))
-voices = v.get("voices") or []
-if not supported and not voices:
-  print("ERROR: Azure TTS did not report am-ET support. Details:", v)
-  sys.exit(1)
-if not test:
-  print("ERROR: Azure TTS test synthesis failed. Details:", v)
-  sys.exit(1)
-print("OK: Azure TTS supports am-ET. Voices:", voices[:5])
+data = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+yt = data.get("youtube") or {}
+api_ok = bool(yt.get("api_key_configured"))
+oauth_ok = bool(yt.get("oauth_configured"))
+print("YouTube API key configured:", api_ok)
+print("YouTube OAuth configured:", oauth_ok)
+if not api_ok or not oauth_ok:
+  print("WARN: Full autopilot (discover + upload) requires YOUTUBE_API_KEY + OAuth creds in .env")
 PY
-fi
 
 echo "[extra] 10-second ffmpeg encode inside runner container..."
 "${COMPOSE_CMD[@]}" exec -T runner bash -lc 'set -euo pipefail; rm -f /tmp/smoke.mp4; ffmpeg -hide_banner -y -f lavfi -i testsrc=size=1280x720:rate=30 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 10 -pix_fmt yuv420p -c:v libx264 -preset veryfast -crf 28 -c:a aac /tmp/smoke.mp4 >/dev/null; ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 /tmp/smoke.mp4'

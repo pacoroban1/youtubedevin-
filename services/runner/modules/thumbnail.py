@@ -9,6 +9,7 @@ import logging
 from typing import Dict, Any, List
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
+from sqlalchemy import text
 
 from modules.gemini_client import gemini
 from modules.gemini_client import GeminiCallFailed, GeminiNotConfigured
@@ -137,6 +138,24 @@ class ThumbnailGenerator:
         # Pick best by score (contrast proxy).
         best_pick_index = max(range(len(thumbnails)), key=lambda i: float(thumbnails[i].get("score") or 0.0))
         selected_path = thumbnails[best_pick_index]["path"]
+
+        # Persist selection (best-effort).
+        try:
+            with self.db.get_session() as session:
+                session.execute(text("UPDATE thumbnails SET is_selected = FALSE WHERE video_id = :video_id"), {"video_id": video_id})
+                session.execute(
+                    text(
+                        """
+                        UPDATE thumbnails
+                        SET is_selected = TRUE
+                        WHERE video_id = :video_id AND thumbnail_path = :thumbnail_path
+                        """
+                    ),
+                    {"video_id": video_id, "thumbnail_path": selected_path},
+                )
+                session.commit()
+        except Exception:
+            pass
 
         try:
             self.db.update_video_status(video_id, "thumbnailed")

@@ -34,8 +34,8 @@
         "conditions": {
           "string": [
             {
-              "value1": "={{ $json.verification.recommended_provider }}",
-              "operation": "isNotEmpty"
+              "value1": "={{ $json.status }}",
+              "value2": "success"
             }
           ]
         }
@@ -98,7 +98,7 @@
             {
               "value1": "={{ $json.quality_score }}",
               "operation": "largerEqual",
-              "value2": 90
+              "value2": 0.9
             }
           ]
         }

@@ -4,6 +4,7 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: autopilot-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-autopilot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autopilot_secret}
@@ -24,6 +25,7 @@ services:
   n8n:
     image: n8nio/n8n:latest
     container_name: autopilot-n8n
+    restart: unless-stopped
     environment:
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
@@ -75,6 +77,7 @@ services:
       context: ./services/runner
       dockerfile: Dockerfile
     container_name: autopilot-runner
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:

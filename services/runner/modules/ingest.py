@@ -10,6 +10,9 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 import httpx
 
+from modules.gemini_client import gemini
+from modules.gemini_client import GeminiCallFailed, GeminiNotConfigured
+
 
 class VideoIngest:
     def __init__(self, db):
@@ -305,24 +308,31 @@ class VideoIngest:
     
     async def _transcribe_with_gemini(self, audio_path: str) -> Dict[str, Any]:
         """Transcribe audio using Google Gemini."""
-        import google.generativeai as genai
-        
-        genai.configure(api_key=self.gemini_api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        
-        # Upload audio file
-        audio_file = genai.upload_file(audio_path)
-        
-        prompt = """Transcribe this audio file. 
-        Return the transcription as plain text.
-        Include timestamps in the format [MM:SS] at the start of each major section or topic change."""
-        
-        response = model.generate_content([prompt, audio_file])
-        
+        if not gemini.is_configured():
+            raise GeminiNotConfigured("GEMINI_API_KEY")
+
+        import asyncio
+
+        prompt = (
+            "Transcribe this audio file.\n"
+            "Return only the transcript text.\n"
+            "Include coarse timestamps like [MM:SS] at major topic/scene changes."
+        )
+
+        text, model_used, attempts = await asyncio.to_thread(
+            gemini.transcribe_audio_with_fallback,
+            audio_path,
+            prompt=prompt,
+            timeout_s=180.0,
+            retries_per_model=1,
+        )
+
         return {
-            "raw_transcript": response.text,
-            "timestamps": [],  # Parse timestamps from response if needed
-            "source": "gemini"
+            "raw_transcript": text,
+            "timestamps": [],  # optional: parse [MM:SS] markers later
+            "source": "gemini",
+            "model_used": model_used,
+            "attempts": attempts,
         }
     
     async def _clean_transcript(self, raw_transcript: str) -> str:
@@ -360,11 +370,9 @@ class VideoIngest:
     
     async def _clean_with_gemini(self, transcript: str) -> str:
         """Use Gemini to clean and improve transcript."""
-        import google.generativeai as genai
-        
-        genai.configure(api_key=self.gemini_api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        
+        if not gemini.is_configured():
+            return transcript
+
         prompt = f"""Clean up this transcript by:
 1. Fixing grammar and punctuation
 2. Removing filler words and repetitions
@@ -375,9 +383,7 @@ Transcript:
 {transcript[:10000]}  # Limit to avoid token limits
 
 Return only the cleaned transcript, nothing else."""
-        
-        response = model.generate_content(prompt)
-        return response.text
+        return gemini.generate_text(prompt, temperature=0.2)
     
     async def _detect_language(self, text: str) -> str:
         """Detect the language of the transcript."""

@@ -1,4 +1,4 @@
-.PHONY: up down build logs shell clean doctor run
+.PHONY: up down build logs shell clean doctor run verify smoke
 
 # Start services
 up:
@@ -40,3 +40,12 @@ run: doctor
 	@echo "🚀 Services started!"
 	@echo "Runner: http://localhost:8000"
 	@echo "N8N: http://localhost:5678"
+
+# Fast local verifiers (no external API calls).
+verify:
+	@python3 -m compileall services/runner >/dev/null
+	@for f in n8n/workflows/*.json; do python3 -m json.tool $$f >/dev/null; done
+	@echo "ok: verify"
+
+smoke: doctor
+	@./scripts/smoke.sh

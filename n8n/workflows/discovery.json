@@ -69,7 +69,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO daily_reports (report_date, videos_produced) VALUES (CURRENT_DATE, {{ $json.data.videos.length }}) ON CONFLICT (report_date) DO UPDATE SET videos_produced = EXCLUDED.videos_produced",
+        "query": "INSERT INTO daily_reports (report_date, videos_produced) VALUES (CURRENT_DATE, {{ $json.videos.length }}) ON CONFLICT (report_date) DO UPDATE SET videos_produced = EXCLUDED.videos_produced",
         "options": {}
       },
       "id": "save-discovery-stats",
@@ -90,7 +90,7 @@
           "string": [
             {
               "name": "videos",
-              "value": "={{ JSON.stringify($json.data.videos) }}"
+              "value": "={{ JSON.stringify($json.videos) }}"
             }
           ]
         },

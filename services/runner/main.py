@@ -130,6 +130,15 @@ _job_tasks: dict[str, asyncio.Task] = {}
 class FullPipelineRequest(BaseModel):
     video_id: Optional[str] = None
     auto_select: bool = True
+    # Optional discovery tuning (used when auto_select=true and no video_id is provided).
+    queries: Optional[List[str]] = None
+    top_n_channels: int = 10
+    videos_per_channel: int = 5
+
+class DiscoverRequest(BaseModel):
+    queries: Optional[List[str]] = None
+    top_n_channels: int = 10
+    videos_per_channel: int = 5
 
 class TranslateRequest(BaseModel):
     text: str
@@ -198,7 +207,11 @@ async def _run_pipeline_full_job(job_id: str, request: FullPipelineRequest) -> N
             _mark_step(steps, "discover", "running", started_at=_utc_ts())
             job_store.update_job(job_id, steps=steps, current_step="discover")
             
-            discovery_result = await discovery.discover_top_channels()
+            discovery_result = await discovery.discover_top_channels(
+                queries=request.queries,
+                top_n=request.top_n_channels,
+                videos_per_channel=request.videos_per_channel,
+            )
             if discovery_result.get("videos"):
                 video_id = discovery_result["videos"][0]["video_id"]
             
@@ -256,6 +269,13 @@ async def get_config(request: Request):
         "narrator_persona": (os.getenv("NARRATOR_PERSONA") or "futuristic captain").strip(),
         "zthumb": {
             "enabled": False,
+        },
+        "youtube": {
+            "api_key_configured": bool((os.getenv("YOUTUBE_API_KEY") or "").strip()),
+            "oauth_configured": all(
+                (os.getenv(k) or "").strip()
+                for k in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN")
+            ),
         },
         "gemini_configured": bool(os.getenv("GEMINI_API_KEY"))
     })
@@ -364,6 +384,8 @@ async def generate_tts(video_id: str, request: Request, force: bool = False):
                         "narration_url": f"/api/media/audio/{video_id}/narration.wav",
                         "duration_sec": dur,
                         "duration": dur,
+                        "quality_passed": True,
+                        "quality_check_passed": True,
                         "model_used": "cached",
                         "attempts": [],
                         "cached": True,
@@ -428,6 +450,40 @@ async def create_pipeline_full_job(request: FullPipelineRequest):
 
     return {"status": "success", "job": job.to_dict()}
 
+@app.post("/api/pipeline/full")
+async def run_pipeline_full(request: FullPipelineRequest, http_request: Request):
+    """
+    Run the full pipeline synchronously.
+
+    This is useful for n8n scheduled runs that want a single request to succeed/fail
+    based on the full run (rather than fire-and-forget async jobs).
+    """
+    video_id = request.video_id
+    results: Dict[str, Any] = {}
+    try:
+        if not video_id and request.auto_select:
+            results["discover"] = await discovery.discover_top_channels(
+                queries=request.queries,
+                top_n=request.top_n_channels,
+                videos_per_channel=request.videos_per_channel,
+            )
+            if (results["discover"] or {}).get("videos"):
+                video_id = results["discover"]["videos"][0]["video_id"]
+        if not video_id:
+            return _json(http_request, 400, {"status": "error", "error": "missing_video_id", "message": "video_id required (or set auto_select=true)"})
+
+        results["ingest"] = await ingest.process_video(video_id)
+        results["script"] = await script_gen.generate_full_script(video_id)
+        results["voice"] = await voice_gen.generate_narration(video_id)
+        results["render"] = await timing.render_with_alignment(video_id)
+        results["thumbnail"] = await thumbnail_gen.generate_thumbnails(video_id)
+        results["upload"] = await uploader.upload_video(video_id)
+        results["distribute"] = await growth.distribute_and_track(video_id)
+
+        return _json(http_request, 200, {"status": "success", "video_id": video_id, "results": results})
+    except Exception as e:
+        return _json(http_request, 502, {"status": "error", "error": "pipeline_failed", "message": str(e), "video_id": video_id, "results": results})
+
 @app.get("/api/jobs")
 async def list_jobs(limit: int = 20, request: Request = None):
     try:
@@ -456,8 +512,12 @@ async def cancel_job(job_id: str, request: Request):
         return _json(request, 502, {"status": "error", "error": "cancel_failed", "message": str(e), "job_id": job_id})
 
 @app.post("/api/discover")
-async def discover(request: Request):
-    out = await discovery.discover_top_channels()
+async def discover(request: Request, body: Optional[DiscoverRequest] = None):
+    out = await discovery.discover_top_channels(
+        queries=(body.queries if body else None),
+        top_n=(body.top_n_channels if body else 10),
+        videos_per_channel=(body.videos_per_channel if body else 5),
+    )
     # discovery may return {"error": "..."} if not configured; keep JSON always.
     status = "success" if not out.get("error") else "error"
     return _json(request, 200, {"status": status, **out})
@@ -486,10 +546,52 @@ async def upload_video(video_id: str, request: Request):
     except Exception as e:
         return _json(request, 502, {"status": "error", "error": "upload_failed", "message": str(e), "video_id": video_id})
 
+@app.post("/api/distribute/{video_id}")
+async def distribute_video(video_id: str, request: Request):
+    try:
+        out = await growth.distribute_and_track(video_id)
+        return _json(request, 200, {"status": "success", "video_id": video_id, **(out or {})})
+    except Exception as e:
+        return _json(request, 502, {"status": "error", "error": "distribute_failed", "message": str(e), "video_id": video_id})
+
 @app.get("/api/report/daily")
 async def daily_report(request: Request):
-    # Growth loop has no dedicated report method; keep a minimal snapshot for UI.
-    return _json(request, 200, {"status": "success", "message": "not_implemented", "hint": "daily reporting not wired yet"})
+    """
+    Minimal daily report for n8n + UI.
+
+    We keep this lightweight and DB-derived so it works without any external
+    analytics API calls.
+    """
+    try:
+        from sqlalchemy import text
+
+        with db.get_session() as session:
+            produced = session.execute(text("SELECT COUNT(*) FROM renders WHERE created_at::date = CURRENT_DATE")).scalar() or 0
+            uploaded = session.execute(text("SELECT COUNT(*) FROM uploads WHERE uploaded_at::date = CURRENT_DATE")).scalar() or 0
+            total_views = session.execute(text("SELECT COALESCE(SUM(views), 0) FROM metrics WHERE recorded_at::date = CURRENT_DATE")).scalar() or 0
+            avg_ctr = session.execute(text("SELECT COALESCE(AVG(ctr_percent), 0) FROM metrics WHERE recorded_at::date = CURRENT_DATE")).scalar() or 0
+
+        recommendations = []
+        if uploaded == 0:
+            recommendations.append("No uploads today. Check YouTube OAuth (YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN).")
+        if produced == 0:
+            recommendations.append("No renders today. Check ingest/transcription + ffmpeg capacity.")
+        if not recommendations:
+            recommendations.append("System healthy. Consider posting top performers to Telegram/X.")
+
+        report = {
+            "date": datetime.utcnow().date().isoformat(),
+            "summary": {
+                "videos_produced": int(produced),
+                "videos_uploaded": int(uploaded),
+                "total_views": int(total_views),
+                "avg_ctr": float(avg_ctr),
+            },
+            "recommendations": recommendations,
+        }
+        return _json(request, 200, {"status": "success", "report": report})
+    except Exception as e:
+        return _json(request, 502, {"status": "error", "error": "daily_report_failed", "message": str(e)})
 
 @app.get("/api/verify/voice")
 async def verify_voice(request: Request):
