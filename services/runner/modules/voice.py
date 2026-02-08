@@ -10,6 +10,7 @@ import logging
 import re
 import wave
 import contextlib
+import uuid
 from typing import Dict, Any, List
 
 from modules.gemini_client import gemini
@@ -47,7 +48,7 @@ class VoiceGenerator:
                 pass
         return audio_bytes
     
-    async def generate_narration(self, video_id: str) -> Dict[str, Any]:
+    async def generate_narration(self, video_id: str, *, voice_name: str | None = None) -> Dict[str, Any]:
         """
         Generate Amharic narration audio from script using Gemini TTS.
         """
@@ -128,6 +129,9 @@ class VoiceGenerator:
         max_chars = int(os.getenv("TTS_MAX_CHARS") or "8000")
         narration_text = narration_text[:max_chars]
 
+        # Allow per-request overrides (e.g., for auditioning voices).
+        voice = (voice_name or self.voice_name or "Puck").strip() or "Puck"
+
         try:
             # The Gemini SDK call is synchronous; run it in a thread with a hard wall-clock timeout
             # so the HTTP request can never "hang" the FastAPI worker.
@@ -135,7 +139,7 @@ class VoiceGenerator:
                 asyncio.to_thread(
                     gemini.generate_speech_with_fallback,
                     narration_text,
-                    voice_name=self.voice_name,
+                    voice_name=voice,
                     timeout_s=60.0,
                     retries_per_model=2,
                 ),
@@ -191,7 +195,7 @@ class VoiceGenerator:
         # Save to database
         audio_data = {
             "voice_provider": "gemini",
-            "voice_id": self.voice_name,
+            "voice_id": voice,
             "audio_file_path": final_audio_path,
             "duration_seconds": duration,
             "quality_check_passed": True,
@@ -214,6 +218,96 @@ class VoiceGenerator:
             "quality_passed": True,
             "quality_check_passed": True,
             "model_used": model_used,
+            "voice_id": voice,
+            "attempts": attempts,
+        }
+
+    async def generate_preview(self, text: str, *, voice_name: str | None = None) -> Dict[str, Any]:
+        """
+        Generate a short TTS preview clip for auditioning voices.
+
+        This does NOT touch the DB. Output is written under:
+          /app/media/tts_previews/<preview_id>.wav
+        """
+        if not gemini.is_configured():
+            return {
+                "status": "error",
+                "error": "missing_env",
+                "message": "GEMINI_API_KEY is required for TTS",
+            }
+
+        preview_text = (text or "").strip()
+        if not preview_text:
+            return {
+                "status": "error",
+                "error": "empty_text",
+                "message": "text is required",
+            }
+
+        max_chars = int(os.getenv("TTS_PREVIEW_MAX_CHARS") or "600")
+        preview_text = preview_text[:max_chars]
+
+        voice = (voice_name or self.voice_name or "Puck").strip() or "Puck"
+
+        try:
+            audio_bytes, model_used, attempts = await asyncio.wait_for(
+                asyncio.to_thread(
+                    gemini.generate_speech_with_fallback,
+                    preview_text,
+                    voice_name=voice,
+                    timeout_s=30.0,
+                    retries_per_model=1,
+                ),
+                timeout=90.0,
+            )
+        except GeminiNotConfigured:
+            return {
+                "status": "error",
+                "error": "missing_env",
+                "message": "GEMINI_API_KEY is required for TTS",
+            }
+        except asyncio.TimeoutError:
+            return {
+                "status": "error",
+                "error": "tts_timeout",
+                "message": "TTS preview request timed out",
+                "attempts": [],
+            }
+        except GeminiCallFailed as e:
+            return {
+                "status": "error",
+                "error": "tts_generation_failed",
+                "attempts": e.attempts_as_dicts(),
+                "hint": "check if Gemini TTS is enabled for this key/tier",
+            }
+
+        previews_dir = os.path.join(self.media_dir, "tts_previews")
+        os.makedirs(previews_dir, exist_ok=True)
+        preview_id = uuid.uuid4().hex
+        preview_path = os.path.join(previews_dir, f"{preview_id}.wav")
+
+        wav_bytes = self._decode_audio_bytes(audio_bytes)
+        if wav_bytes.startswith(b"RIFF"):
+            with open(preview_path, "wb") as f:
+                f.write(wav_bytes)
+        else:
+            sample_rate = int(os.getenv("TTS_SAMPLE_RATE") or "24000")
+            with wave.open(preview_path, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(sample_rate)
+                w.writeframes(wav_bytes)
+
+        duration = self._get_wav_duration(preview_path)
+        return {
+            "status": "success",
+            "preview_id": preview_id,
+            "audio_path": preview_path,
+            "audio_url": f"/api/media/tts_previews/{preview_id}.wav",
+            "duration_sec": duration,
+            "duration": duration,
+            "model_used": model_used,
+            "voice_id": voice,
             "attempts": attempts,
         }
 

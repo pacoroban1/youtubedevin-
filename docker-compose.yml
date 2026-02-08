@@ -108,7 +108,8 @@ services:
       - ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI=${ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI}
       # Audio mixing (let original movie/scene audio bleed through during windows)
       - AUDIO_MIX_MODE=${AUDIO_MIX_MODE:-windows}
-      - ORIG_AUDIO_DUCK_GAIN=${ORIG_AUDIO_DUCK_GAIN:-0.03}
+      # Default is fully muted outside windows to avoid English narrator bleed from recap sources.
+      - ORIG_AUDIO_DUCK_GAIN=${ORIG_AUDIO_DUCK_GAIN:-0.0}
       - ORIG_AUDIO_FULL_GAIN=${ORIG_AUDIO_FULL_GAIN:-1.0}
       - NARRATION_GAIN=${NARRATION_GAIN:-1.0}
       - NARRATION_DUCK_GAIN=${NARRATION_DUCK_GAIN:-0.15}

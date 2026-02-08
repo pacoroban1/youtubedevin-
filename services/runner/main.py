@@ -157,6 +157,19 @@ class TranslateRequest(BaseModel):
     target_lang: str = "am"
     source_lang: Optional[str] = None
 
+class TTSPreviewRequest(BaseModel):
+    text: str
+    voice_name: Optional[str] = None
+
+class AudioWindow(BaseModel):
+    start_time: float
+    end_time: float
+    fade_seconds: float = 0.25
+    label: Optional[str] = None
+
+class AudioWindowsRequest(BaseModel):
+    windows: List[AudioWindow]
+
 # --- Helper Functions ---
 
 def _utc_ts() -> str:
@@ -426,14 +439,15 @@ async def generate_full_script(video_id: str, request: Request, force: bool = Fa
 
 @app.post("/api/tts/{video_id}")
 @app.post("/api/voice/{video_id}") # Alias
-async def generate_tts(video_id: str, request: Request, force: bool = False):
+async def generate_tts(video_id: str, request: Request, force: bool = False, voice_name: Optional[str] = None):
     """Generate narration audio."""
     if not (os.getenv("GEMINI_API_KEY") or "").strip():
         return _json(request, 400, {"status": "error", "error": "missing_env", "message": "GEMINI_API_KEY is required", "video_id": video_id})
 
     # Idempotent: if we already generated audio for this video, return it instead
     # of re-running TTS (which can be slow / flaky / expensive).
-    if not force:
+    # If a voice_name override is provided, bypass cache and regenerate.
+    if (not force) and (not voice_name):
         try:
             tts_path = MEDIA_DIR / "tts" / f"{video_id}.wav"
             narration_path = MEDIA_DIR / "audio" / video_id / "narration.wav"
@@ -459,6 +473,7 @@ async def generate_tts(video_id: str, request: Request, force: bool = False):
                         "quality_passed": True,
                         "quality_check_passed": True,
                         "model_used": "cached",
+                        "voice_id": a.get("voice_id"),
                         "attempts": [],
                         "cached": True,
                     },
@@ -478,11 +493,84 @@ async def generate_tts(video_id: str, request: Request, force: bool = False):
     except Exception as e:
         return _json(request, 502, {"status": "error", "error": "precondition_failed", "message": str(e), "video_id": video_id})
 
-    out = await voice_gen.generate_narration(video_id)
+    out = await voice_gen.generate_narration(video_id, voice_name=voice_name)
     if isinstance(out, dict) and out.get("status") == "error":
         code = 400 if out.get("error") == "missing_env" else 502
         return _json(request, code, out)
     return _json(request, 200, out if isinstance(out, dict) else {"status": "success", "video_id": video_id, "result": out})
+
+@app.get("/api/tts/voices")
+async def list_tts_voices(request: Request):
+    """
+    List known Gemini prebuilt voice names. This is a convenience endpoint for auditioning.
+    """
+    voices = ["Puck", "Kore", "Aoede", "Charon", "Fenrir", "Leda"]
+    default_voice = (os.getenv("GEMINI_TTS_VOICE_NAME") or "Puck").strip() or "Puck"
+    return _json(request, 200, {"status": "success", "voices": voices, "default_voice": default_voice})
+
+@app.post("/api/tts_preview")
+async def preview_tts(body: TTSPreviewRequest, request: Request):
+    """
+    Generate a short TTS preview clip for quick voice auditioning.
+    """
+    if not (os.getenv("GEMINI_API_KEY") or "").strip():
+        return _json(request, 400, {"status": "error", "error": "missing_env", "message": "GEMINI_API_KEY is required"})
+    out = await voice_gen.generate_preview(body.text, voice_name=body.voice_name)
+    if isinstance(out, dict) and out.get("status") == "error":
+        code = 400 if out.get("error") in ("missing_env", "empty_text") else 502
+        return _json(request, code, out)
+    return _json(request, 200, out if isinstance(out, dict) else {"status": "success", "result": out})
+
+@app.put("/api/audio/windows/{video_id}")
+async def set_audio_windows(video_id: str, body: AudioWindowsRequest, request: Request):
+    """
+    Override "original audio" windows used by the renderer (smooth in/out points).
+
+    The override file is stored under:
+      /api/media/output/<video_id>/audio_windows.override.json
+
+    Times are in narration-time seconds (i.e., the timeline of the generated Amharic voiceover).
+    """
+    out_dir = MEDIA_DIR / "output" / video_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    override_path = out_dir / "audio_windows.override.json"
+
+    windows_out: List[Dict[str, Any]] = []
+    for w in (body.windows or []):
+        try:
+            st = float(w.start_time)
+            en = float(w.end_time)
+            fade = float(w.fade_seconds or 0.25)
+        except Exception:
+            continue
+        if st < 0:
+            st = 0.0
+        if en <= st:
+            continue
+        fade = max(0.01, min(fade, 2.0))
+        win = {"start_time": round(st, 3), "end_time": round(en, 3), "fade_seconds": round(fade, 3)}
+        if w.label:
+            win["label"] = str(w.label)[:64]
+        windows_out.append(win)
+
+    windows_out.sort(key=lambda x: float(x.get("start_time") or 0.0))
+
+    try:
+        override_path.write_text(json.dumps({"windows": windows_out}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except Exception as e:
+        return _json(request, 502, {"status": "error", "error": "write_failed", "message": str(e), "video_id": video_id})
+
+    return _json(
+        request,
+        200,
+        {
+            "status": "success",
+            "video_id": video_id,
+            "windows_count": len(windows_out),
+            "override_path": str(override_path),
+            "override_url": f"/api/media/output/{video_id}/audio_windows.override.json",
+        },
+    )
 
 @app.post("/api/thumbnail/{video_id}")
 async def generate_thumbnail(video_id: str, request: Request):

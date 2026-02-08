@@ -294,7 +294,10 @@ class TimingMatcher:
             audio_mode = (os.getenv("AUDIO_MIX_MODE") or "replace").strip().lower()
 
             # Mix tuning (safe defaults: mostly narration, occasional original audio windows)
-            orig_duck = float(os.getenv("ORIG_AUDIO_DUCK_GAIN") or "0.03")  # outside windows
+            # Default outside-window gain is 0.0 to fully mute the source audio by default.
+            # Recap videos often include an English narrator; leaving any bleed tends to sound bad.
+            # Users can raise this (e.g. 0.01-0.05) if they want a constant ambience bed.
+            orig_duck = float(os.getenv("ORIG_AUDIO_DUCK_GAIN") or "0.0")  # outside windows
             orig_full = float(os.getenv("ORIG_AUDIO_FULL_GAIN") or "1.0")   # inside windows
             nar_gain = float(os.getenv("NARRATION_GAIN") or "1.0")
             nar_duck = float(os.getenv("NARRATION_DUCK_GAIN") or "0.15")    # inside windows
@@ -334,24 +337,41 @@ class TimingMatcher:
                     f"if(between(t,{c},{d}),{nar_duck}+(1-{nar_duck})*(t-{c})/{fade},1)))"
                 )
 
-            def _load_windows() -> List[Dict[str, Any]]:
+            def _load_windows() -> tuple[List[Dict[str, Any]], bool]:
                 if not video_id:
-                    return []
+                    return [], False
+
+                # Optional override file: these windows are assumed to already be in
+                # narration-time seconds (no scaling).
+                override_path = os.path.join(
+                    self.media_dir, "output", video_id, "audio_windows.override.json"
+                )
+                if os.path.exists(override_path):
+                    try:
+                        with open(override_path, "r", encoding="utf-8") as f:
+                            obj = json.load(f)
+                        wins = obj.get("windows") if isinstance(obj, dict) else obj
+                        if isinstance(wins, list):
+                            return wins, True
+                    except Exception:
+                        # Best-effort; fall through to DB-backed windows.
+                        pass
+
                 try:
                     s = self.db.get_script(video_id) or {}
                     raw = s.get("full_script")
                     if not raw:
-                        return []
+                        return [], False
                     if isinstance(raw, str):
                         obj = json.loads(raw)
                     elif isinstance(raw, dict):
                         obj = raw
                     else:
-                        return []
+                        return [], False
                     wins = obj.get("original_audio_windows") or []
-                    return wins if isinstance(wins, list) else []
+                    return (wins, False) if isinstance(wins, list) else ([], False)
                 except Exception:
-                    return []
+                    return [], False
 
             def _scale_windows(wins: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 if not video_id or not wins:
@@ -409,7 +429,20 @@ class TimingMatcher:
                 if audio_mode not in ("windows", "duck"):
                     return None
 
-                wins_scaled = _scale_windows(_load_windows()) if audio_mode == "windows" else []
+                wins_raw, already_scaled = _load_windows() if audio_mode == "windows" else ([], False)
+                wins_scaled = wins_raw if already_scaled else _scale_windows(wins_raw)
+
+                # Always emit a suggested scaled windows file so users can tweak without
+                # digging into the DB. Do this best-effort and never block rendering.
+                if video_id and audio_mode == "windows":
+                    try:
+                        out_dir = os.path.dirname(output_file)
+                        os.makedirs(out_dir, exist_ok=True)
+                        suggested_path = os.path.join(out_dir, "audio_windows.suggested.json")
+                        with open(suggested_path, "w", encoding="utf-8") as f:
+                            json.dump({"windows": wins_scaled}, f, ensure_ascii=False, indent=2)
+                    except Exception:
+                        pass
 
                 # Expressions are evaluated per-frame.
                 orig_expr = f"{orig_duck}"
