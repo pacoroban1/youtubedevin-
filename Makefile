@@ -1,28 +1,30 @@
-.PHONY: up down build logs shell clean doctor run verify smoke
+.PHONY: up down build logs shell clean doctor run verify smoke gate-local release promote rollback gcp-health
+
+COMPOSE ?= $(shell if command -v docker-compose >/dev/null 2>&1; then echo docker-compose; else echo "docker compose"; fi)
 
 # Start services
 up:
-	docker-compose up -d
+	$(COMPOSE) up -d
 
 # Stop services
 down:
-	docker-compose down
+	$(COMPOSE) down
 
 # Build services
 build:
-	docker-compose build
+	$(COMPOSE) build
 
 # View logs
 logs:
-	docker-compose logs -f
+	$(COMPOSE) logs -f
 
 # Shell into runner
 shell:
-	docker-compose exec runner bash
+	$(COMPOSE) exec runner bash
 
 # Clean up volumes
 clean:
-	docker-compose down -v
+	$(COMPOSE) down -v
 
 # Check environment health
 doctor:
@@ -36,7 +38,7 @@ doctor:
 
 # Run everything (Postgres + N8N + Runner)
 run: doctor
-	docker-compose up -d --build
+	$(COMPOSE) up -d --build
 	@echo "🚀 Services started!"
 	@echo "Runner: http://localhost:8000"
 	@echo "N8N: http://localhost:5678"
@@ -49,3 +51,29 @@ verify:
 
 smoke: doctor
 	@./scripts/smoke.sh
+
+# Local acceptance gate (verify + doctor + smoke + runner health + optional full pipeline run)
+gate-local:
+	@bash scripts/gate_local.sh
+
+# Freeze a known-good, locally-gated release tag and push it.
+#
+# Usage:
+#   VIDEO_ID=... make release TAG=v1.0.0
+release:
+	@TAG="$(TAG)" bash scripts/release.sh
+
+# Deploy a tag to your GCP VM (runs local gate unless SKIP_GATE=1).
+#
+# Required env:
+#   GCP_PROJECT=... GCP_ZONE=... GCP_VM=...
+promote:
+	@bash -lc 'set -euo pipefail; if [[ "$${SKIP_GATE:-0}" != "1" ]]; then bash scripts/gate_local.sh; fi; bash infra/gcp/remote.sh promote --tag "$(TAG)"'
+
+# Roll back to the previously deployed tag on the VM, or to an explicit TAG if provided.
+rollback:
+	@bash infra/gcp/remote.sh rollback $(if $(TAG),--tag $(TAG),)
+
+# Remote healthcheck on the VM.
+gcp-health:
+	@bash infra/gcp/remote.sh health

@@ -46,6 +46,51 @@ make up
    - runner API: http://localhost:8000
    - UI dashboard: http://localhost:8000/ui
 
+## Local→Cloud Promotion (GCP)
+
+Deploy only **tagged, locally-gated** releases to a single always-on Compute Engine VM.
+
+Full guide: `docs/DEPLOY_GCP.md`
+
+### Local Gate
+
+```bash
+make gate-local
+VIDEO_ID=YOUTUBE_VIDEO_ID make gate-local
+```
+
+### Release Freeze (Tag)
+
+```bash
+VIDEO_ID=YOUTUBE_VIDEO_ID make release TAG=v1.0.0
+```
+
+### Promote (Deploy Tag to VM)
+
+```bash
+export GCP_PROJECT="your-gcp-project-id"
+export GCP_ZONE="us-central1-a"
+export GCP_VM="your-vm-instance-name"
+
+make promote TAG=v1.0.0
+```
+
+### Rollback
+
+```bash
+# Previous deployed tag (on the VM)
+make rollback
+
+# Explicit tag
+make rollback TAG=v1.0.0
+```
+
+### Remote Health Check
+
+```bash
+make gcp-health
+```
+
 ### Environment Variables
 
 See `.env.example` for all required variables:

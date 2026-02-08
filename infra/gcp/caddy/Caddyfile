@@ -1,0 +1,18 @@
+{
+  email {$CADDY_ACME_EMAIL}
+}
+
+# CADDY_SITE:
+#   - If you have a domain: set CADDY_SITE=yourdomain.com (Caddy will auto-HTTPS).
+#   - If you do NOT have a domain: set CADDY_SITE=:80 (HTTP only).
+{$CADDY_SITE} {
+  encode zstd gzip
+
+  # Extra basic auth at the edge (n8n should still have its own auth enabled).
+  basicauth /* {
+    {$CADDY_BASIC_AUTH_USER} {$CADDY_BASIC_AUTH_HASH}
+  }
+
+  reverse_proxy n8n:5678
+}
+

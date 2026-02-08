@@ -1,0 +1,39 @@
+version: '3.8'
+
+# Optional reverse proxy (Caddy) for HTTPS + basic auth in front of n8n.
+#
+# Usage on the VM (from repo root):
+#   ENABLE_CADDY=1 bash infra/gcp/deploy.sh --tag v1.0.0
+#
+# Requires these env vars in /opt/amharic-recap-autopilot/shared/.env:
+#   CADDY_SITE=example.com   (or ":80" for IP-only HTTP mode)
+#   CADDY_ACME_EMAIL=you@example.com   (recommended for Let's Encrypt)
+#   CADDY_BASIC_AUTH_USER=admin
+#   CADDY_BASIC_AUTH_HASH=$2a$...      (bcrypt hash; see docs)
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: autopilot-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - CADDY_SITE=${CADDY_SITE}
+      - CADDY_ACME_EMAIL=${CADDY_ACME_EMAIL}
+      - CADDY_BASIC_AUTH_USER=${CADDY_BASIC_AUTH_USER}
+      - CADDY_BASIC_AUTH_HASH=${CADDY_BASIC_AUTH_HASH}
+    volumes:
+      - ./infra/gcp/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - autopilot-network
+    depends_on:
+      - n8n
+
+volumes:
+  caddy_data:
+  caddy_config:
+
