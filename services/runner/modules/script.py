@@ -46,7 +46,9 @@ class ScriptGenerator:
         self.max_attempts = int(os.getenv("SCRIPT_MAX_ATTEMPTS") or "2")
         # "Let the movie breathe" moments: short windows where original audio is allowed to come through.
         # These are inferred from beat timing, and used during render mixing.
-        self.orig_audio_window_count = int(os.getenv("ORIG_AUDIO_WINDOW_COUNT") or "4")
+        # Default to 0: recap sources often have an English narrator baked into the audio track.
+        # It's safer to keep source audio fully muted unless the user explicitly sets windows.
+        self.orig_audio_window_count = int(os.getenv("ORIG_AUDIO_WINDOW_COUNT") or "0")
         self.orig_audio_window_seconds = float(os.getenv("ORIG_AUDIO_WINDOW_SECONDS") or "2.8")
         self.orig_audio_fade_seconds = float(os.getenv("ORIG_AUDIO_FADE_SECONDS") or "0.25")
 
@@ -422,8 +424,8 @@ Output JSON format matches this schema:
             md.append(f"### Beat {i+1}")
             md.append(str((seg or {}).get("text") or "(empty)").strip())
             md.append("")
+        md.append("## Original Audio Windows (Smooth In/Out)")
         if isinstance(windows, list) and windows:
-            md.append("## Original Audio Windows (Smooth In/Out)")
             for w in windows:
                 if not isinstance(w, dict):
                     continue
@@ -431,14 +433,16 @@ Output JSON format matches this schema:
                 en = self._fmt_ts(float(w.get("end_time") or 0.0))
                 label = str(w.get("label") or "").strip()
                 md.append(f"- {st} → {en}: {label}")
-            md.append("")
-            md.append("## Override These Windows (Optional)")
-            md.append("If the source video's English narrator leaks through, override the windows.")
-            md.append("The renderer will prefer this file (times are narration-time seconds):")
-            md.append(f"- /api/media/output/{video_id}/audio_windows.override.json")
-            md.append("You can also set it via API:")
-            md.append(f"- PUT /api/audio/windows/{video_id}")
-            md.append("")
+        else:
+            md.append("- (none; source audio muted by default)")
+        md.append("")
+        md.append("## Override These Windows (Optional)")
+        md.append("If the source video's English narrator leaks through, override the windows.")
+        md.append("The renderer will prefer this file (times are narration-time seconds):")
+        md.append(f"- /api/media/output/{video_id}/audio_windows.override.json")
+        md.append("You can also set it via API:")
+        md.append(f"- PUT /api/audio/windows/{video_id}")
+        md.append("")
         md.append("## Payoff")
         md.append(payoff or "(empty)")
         md.append("")
