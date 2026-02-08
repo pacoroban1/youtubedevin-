@@ -131,6 +131,8 @@ _job_tasks: dict[str, asyncio.Task] = {}
 class FullPipelineRequest(BaseModel):
     video_id: Optional[str] = None
     auto_select: bool = True
+    # Optional: override narrator voice for this run (Gemini prebuilt voice name).
+    voice_name: Optional[str] = None
     # Optional discovery tuning (used when auto_select=true and no video_id is provided).
     queries: Optional[List[str]] = None
     top_n_channels: int = 10
@@ -323,7 +325,7 @@ async def _run_pipeline_full_job(job_id: str, request: FullPipelineRequest) -> N
         # Execution
         await run_step("ingest", lambda: ingest.process_video(video_id))
         await run_step("script", lambda: script_gen.generate_full_script(video_id))
-        await run_step("voice", lambda: voice_gen.generate_narration(video_id))
+        await run_step("voice", lambda: voice_gen.generate_narration(video_id, voice_name=request.voice_name))
         await run_step("render", lambda: timing.render_with_alignment(video_id))
         await run_step("thumbnail", lambda: thumbnail_gen.generate_thumbnails(video_id))
         await run_step("upload", lambda: uploader.upload_video(video_id))
@@ -669,7 +671,7 @@ async def run_pipeline_full(request: FullPipelineRequest, http_request: Request)
             try:
                 attempt_results["ingest"] = await ingest.process_video(video_id)
                 attempt_results["script"] = await script_gen.generate_full_script(video_id)
-                attempt_results["voice"] = await voice_gen.generate_narration(video_id)
+                attempt_results["voice"] = await voice_gen.generate_narration(video_id, voice_name=request.voice_name)
                 attempt_results["render"] = await timing.render_with_alignment(video_id)
                 attempt_results["thumbnail"] = await thumbnail_gen.generate_thumbnails(video_id)
                 attempt_results["upload"] = await uploader.upload_video(video_id)
