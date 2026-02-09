@@ -24,3 +24,4 @@ datasets/thumbs/masks/*
 *.bak
 *.bak.*
 .env
+.env
