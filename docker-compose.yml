@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:15-alpine
@@ -12,8 +10,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autopilot}"]
       interval: 10s
@@ -65,7 +61,7 @@ services:
       - ./scripts:/home/node/scripts
       - autopilot_media:/home/node/media
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,7 +75,7 @@ services:
     container_name: autopilot-runner
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -102,8 +98,18 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GEMINI_TTS_VOICE_NAME=${GEMINI_TTS_VOICE_NAME:-Puck}
       - TTS_SAMPLE_RATE=${TTS_SAMPLE_RATE:-24000}
+      - TTS_PROVIDER=${TTS_PROVIDER}
+      - TTS_MAX_CHARS=${TTS_MAX_CHARS}
+      - TTS_PREVIEW_MAX_CHARS=${TTS_PREVIEW_MAX_CHARS}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
+      - ELEVENLABS_MODEL_ID=${ELEVENLABS_MODEL_ID}
+      - ELEVENLABS_TIMEOUT_S=${ELEVENLABS_TIMEOUT_S}
+      - ELEVENLABS_STABILITY=${ELEVENLABS_STABILITY}
+      - ELEVENLABS_SIMILARITY_BOOST=${ELEVENLABS_SIMILARITY_BOOST}
+      - ELEVENLABS_STYLE=${ELEVENLABS_STYLE}
+      - ELEVENLABS_USE_SPEAKER_BOOST=${ELEVENLABS_USE_SPEAKER_BOOST}
       - ZTHUMB_URL=${ZTHUMB_URL}
       - ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI=${ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI}
       # Audio mixing (let original movie/scene audio bleed through during windows)

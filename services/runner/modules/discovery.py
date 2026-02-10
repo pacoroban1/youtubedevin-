@@ -6,6 +6,9 @@ Discovers top-performing recap YouTube channels and videos.
 import os
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta, timezone
+import subprocess
+import xml.etree.ElementTree as ET
+import aiohttp
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import json
@@ -43,7 +46,10 @@ class ChannelDiscovery:
         min_duration_seconds: int = 180,
     ) -> Dict[str, Any]:
         """
-        Discover top recap channels using YouTube Data API.
+        Discover top recap channels and videos.
+
+        Primary: YouTube Data API (if `YOUTUBE_API_KEY` is configured).
+        Fallback: YouTube RSS + yt-dlp metadata (if `SCOUT_CHANNEL_IDS` is configured).
         
         Args:
             queries: Search queries for finding recap channels
@@ -67,7 +73,16 @@ class ChannelDiscovery:
             ]
         
         if not self.youtube:
-            return {"error": "YouTube API not configured", "channels": [], "videos": []}
+            return await self._discover_from_rss(
+                queries=queries,
+                top_n=top_n,
+                videos_per_channel=videos_per_channel,
+                lookback_days=lookback_days,
+                max_video_age_hours=max_video_age_hours,
+                min_views_per_hour=min_views_per_hour,
+                min_views_total=min_views_total,
+                min_duration_seconds=min_duration_seconds,
+            )
         
         all_channels = {}
         
@@ -157,6 +172,322 @@ class ChannelDiscovery:
             "selection_mode": selection_mode,
             "thresholds": snapshot["thresholds"],
             "snapshot_saved": True
+        }
+
+    def _parse_scout_channel_ids(self, queries: Optional[List[str]] = None) -> List[str]:
+        """
+        RSS fallback requires explicit channel IDs.
+
+        Sources (first hit wins):
+          1) If `queries` looks like a list of channel IDs (UC...), treat as channel list.
+          2) Env `SCOUT_CHANNEL_IDS` (comma/space-separated).
+        """
+        if queries:
+            q = [str(x or "").strip() for x in queries]
+            q = [x for x in q if x]
+            # Basic heuristic: YouTube channel IDs typically start with "UC".
+            if q and all(x.startswith("UC") and len(x) >= 20 for x in q):
+                return q
+
+        raw = (os.getenv("SCOUT_CHANNEL_IDS") or "").strip()
+        if not raw:
+            return []
+        # Split on comma and/or whitespace.
+        parts = []
+        for chunk in raw.replace(",", " ").split():
+            s = chunk.strip()
+            if s:
+                parts.append(s)
+        return parts
+
+    async def _fetch_channel_rss_entries(
+        self, channel_id: str, max_results: int, lookback_days: int
+    ) -> Dict[str, Any]:
+        """
+        Fetch a channel RSS feed and return channel metadata + recent entries.
+
+        Returns:
+          {
+            "channel": {"channel_id":..., "channel_name":...},
+            "entries": [{"video_id":..., "title":..., "published_at":...}, ...]
+          }
+        """
+        url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+        timeout = aiohttp.ClientTimeout(total=20)
+        headers = {"User-Agent": "Mozilla/5.0"}
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status != 200:
+                    raise Exception(f"rss_fetch_failed status={resp.status}")
+                xml_text = await resp.text()
+
+        ns = {
+            "atom": "http://www.w3.org/2005/Atom",
+            "yt": "http://www.youtube.com/xml/schemas/2015",
+        }
+        root = ET.fromstring(xml_text)
+
+        # Feed title is usually the channel name.
+        channel_name = channel_id
+        try:
+            t = root.find("atom:title", ns)
+            if t is not None and (t.text or "").strip():
+                channel_name = (t.text or "").strip()
+        except Exception:
+            channel_name = channel_id
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=int(lookback_days))
+        entries: List[Dict[str, Any]] = []
+        for entry in root.findall("atom:entry", ns):
+            vid = None
+            published_at = None
+            title = ""
+            try:
+                v = entry.find("yt:videoId", ns)
+                if v is not None and (v.text or "").strip():
+                    vid = (v.text or "").strip()
+            except Exception:
+                vid = None
+
+            try:
+                p = entry.find("atom:published", ns)
+                if p is not None and (p.text or "").strip():
+                    published_at = (p.text or "").strip()
+            except Exception:
+                published_at = None
+
+            try:
+                tt = entry.find("atom:title", ns)
+                if tt is not None and (tt.text or "").strip():
+                    title = (tt.text or "").strip()
+            except Exception:
+                title = ""
+
+            if not vid:
+                continue
+
+            # Apply lookback filter using RSS published date when available.
+            if published_at:
+                try:
+                    published_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+                    if published_dt.tzinfo is None:
+                        published_dt = published_dt.replace(tzinfo=timezone.utc)
+                    if published_dt < cutoff:
+                        continue
+                except Exception:
+                    pass
+
+            entries.append({"video_id": vid, "title": title, "published_at": published_at})
+            if len(entries) >= int(max_results):
+                break
+
+        return {"channel": {"channel_id": channel_id, "channel_name": channel_name}, "entries": entries}
+
+    def _yt_dlp_video_info(self, video_id: str) -> Dict[str, Any]:
+        """
+        Fetch video metadata via yt-dlp (no YouTube Data API required).
+        """
+        cmd = [
+            "yt-dlp",
+            "--dump-single-json",
+            "--skip-download",
+            "--no-playlist",
+            f"https://www.youtube.com/watch?v={video_id}",
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if res.returncode != 0:
+                print(f"yt-dlp metadata error: {res.stderr}")
+                return {}
+            return json.loads(res.stdout or "{}") if (res.stdout or "").strip() else {}
+        except Exception as e:
+            print(f"yt-dlp metadata fetch failed: {e}")
+            return {}
+
+    def _ts_to_published_at(self, ts: Optional[int], fallback_iso: Optional[str] = None) -> Optional[str]:
+        """
+        Convert a UNIX timestamp to ISO8601 Z string.
+        """
+        if ts is None:
+            if not fallback_iso:
+                return None
+            # Normalize to Z if possible.
+            try:
+                dt = datetime.fromisoformat(fallback_iso.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            except Exception:
+                return fallback_iso
+        try:
+            return datetime.fromtimestamp(int(ts), tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        except Exception:
+            return fallback_iso
+
+    async def _discover_from_rss(
+        self,
+        queries: Optional[List[str]],
+        top_n: int,
+        videos_per_channel: int,
+        lookback_days: int,
+        max_video_age_hours: float,
+        min_views_per_hour: float,
+        min_views_total: int,
+        min_duration_seconds: int,
+    ) -> Dict[str, Any]:
+        """
+        Fallback discovery path that avoids YouTube Data API.
+
+        Requires:
+          - Env `SCOUT_CHANNEL_IDS` (comma/space-separated channel IDs), or
+          - Passing channel IDs via `queries` (heuristic: UC...).
+        """
+        channel_ids = self._parse_scout_channel_ids(queries=queries)
+        if not channel_ids:
+            return {
+                "error": "YouTube API not configured (set YOUTUBE_API_KEY) and RSS scout not configured (set SCOUT_CHANNEL_IDS)",
+                "channels": [],
+                "videos": [],
+            }
+
+        # Respect caller's top_n limit.
+        channel_ids = channel_ids[: int(top_n)]
+
+        enriched_channels: List[Dict[str, Any]] = []
+        all_videos: List[Dict[str, Any]] = []
+
+        for channel_id in channel_ids:
+            try:
+                rss = await self._fetch_channel_rss_entries(
+                    channel_id=channel_id,
+                    max_results=max(1, int(videos_per_channel) * 2),
+                    lookback_days=lookback_days,
+                )
+            except Exception as e:
+                print(f"RSS fetch failed for channel {channel_id}: {e}")
+                continue
+
+            channel = rss.get("channel") or {"channel_id": channel_id, "channel_name": channel_id}
+            entries = rss.get("entries") or []
+
+            channel_videos: List[Dict[str, Any]] = []
+            for ent in entries:
+                vid = (ent.get("video_id") or "").strip()
+                if not vid:
+                    continue
+                info = self._yt_dlp_video_info(vid)
+                if not info:
+                    continue
+
+                duration_seconds = info.get("duration", None)
+                try:
+                    if duration_seconds is not None and int(duration_seconds) < int(min_duration_seconds):
+                        continue
+                except Exception:
+                    pass
+
+                views = int(info.get("view_count", 0) or 0)
+                like_count = int(info.get("like_count", 0) or 0)
+                comment_count = int(info.get("comment_count", 0) or 0)
+                published_at = self._ts_to_published_at(info.get("timestamp"), fallback_iso=ent.get("published_at"))
+
+                views_velocity = self._calculate_views_velocity(views, published_at) if published_at else 0.0
+                age_hours = self._age_hours(published_at) if published_at else 0.0
+
+                denom = float(max(views, 1))
+                like_rate = like_count / denom
+                comment_rate = comment_count / denom
+                engagement_rate = (like_count + comment_count) / denom
+                viral_score = views_velocity * (1.0 + 6.0 * like_rate) * (1.0 + 20.0 * comment_rate)
+
+                title = (info.get("title") or ent.get("title") or "").strip()
+                description = info.get("description") or ""
+
+                channel_videos.append(
+                    {
+                        "video_id": vid,
+                        "channel_id": channel_id,
+                        "title": title,
+                        "description": description,
+                        "view_count": views,
+                        "like_count": like_count,
+                        "comment_count": comment_count,
+                        "duration_seconds": int(duration_seconds) if duration_seconds is not None else None,
+                        "published_at": published_at,
+                        "views_velocity": views_velocity,
+                        "views_per_hour": views_velocity,
+                        "age_hours": age_hours,
+                        "like_rate": round(like_rate, 6),
+                        "comment_rate": round(comment_rate, 6),
+                        "engagement_rate": round(engagement_rate, 6),
+                        "viral_score": round(viral_score, 4),
+                        "status": "discovered",
+                    }
+                )
+
+            channel_videos.sort(key=lambda x: (x.get("viral_score", 0), x.get("views_velocity", 0)), reverse=True)
+            channel_videos = channel_videos[: int(videos_per_channel)]
+
+            # Save channel/videos to DB (best effort).
+            try:
+                avg_views = int(sum(int(v.get("view_count") or 0) for v in channel_videos) / max(len(channel_videos), 1))
+            except Exception:
+                avg_views = 0
+
+            channel_row = {
+                "channel_id": channel.get("channel_id") or channel_id,
+                "channel_name": channel.get("channel_name") or channel_id,
+                "subscriber_count": 0,
+                "upload_count": 0,
+                "avg_views_per_upload": avg_views,
+                "upload_consistency_score": 0,
+                "growth_proxy_score": 0,
+                # Mild proxy so top_n ordering is stable in RSS mode.
+                "composite_score": round(min(1.0, float(avg_views) / 100000.0), 4),
+            }
+            enriched_channels.append(channel_row)
+            self.db.save_channel(channel_row)
+
+            for v in channel_videos:
+                self.db.save_video(v)
+                all_videos.append(v)
+
+        # Sort videos by viral score (then velocity) and select.
+        all_videos.sort(key=lambda x: (x.get("viral_score", 0), x.get("views_velocity", 0)), reverse=True)
+
+        selected_video, selection_mode = self._select_target_video(
+            all_videos,
+            max_video_age_hours=max_video_age_hours,
+            min_views_per_hour=min_views_per_hour,
+            min_views_total=min_views_total,
+        )
+
+        snapshot = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "discovery_mode": "rss",
+            "channels": enriched_channels,
+            "videos": all_videos,
+            "selected_video_id": (selected_video.get("video_id") if selected_video else None),
+            "selection_mode": selection_mode,
+            "thresholds": {
+                "lookback_days": lookback_days,
+                "max_video_age_hours": max_video_age_hours,
+                "min_views_per_hour": min_views_per_hour,
+                "min_views_total": min_views_total,
+                "min_duration_seconds": min_duration_seconds,
+            },
+        }
+        self._save_snapshot(snapshot)
+
+        return {
+            "channels": enriched_channels,
+            "videos": all_videos,
+            "selected_video_id": (selected_video.get("video_id") if selected_video else None),
+            "selected_video": selected_video,
+            "selection_mode": selection_mode,
+            "thresholds": snapshot["thresholds"],
+            "snapshot_saved": True,
         }
     
     async def _search_channels(self, query: str, max_results: int = 50) -> List[Dict[str, Any]]:

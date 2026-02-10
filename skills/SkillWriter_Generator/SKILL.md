@@ -17,6 +17,32 @@ Use when you need to add a new skill (or improve an existing one) to fill a work
 - You can point to at least one real interface in this repo (a file path, a Make target, a runner endpoint, or an n8n workflow file).
 - If you cannot find a real interface, mark it **UNKNOWN** in the skill and add a discovery step.
 
+## Output Template
+Use this skeleton for every skill you generate (copy/paste, then fill in):
+
+```markdown
+---
+name: <SkillName>
+description: <one sentence, single responsibility>
+---
+
+## When To Use
+
+## Inputs
+
+## Preconditions
+
+## Steps
+
+## Acceptance Criteria
+
+## Verification
+
+## Failure Modes And Fallbacks
+
+## Notes
+```
+
 ## Steps
 1. **Scope lock**: rewrite the goal to a single verb + object (example: "Generate narration WAV for VIDEO_ID").
 1. **Evidence pass** (tool-first):
@@ -25,6 +51,9 @@ Use when you need to add a new skill (or improve an existing one) to fill a work
 1. **Write the SKILL.md** at `skills/<skill_name>/SKILL.md` with:
    - YAML frontmatter: `name`, `description`
    - Sections: `When To Use`, `Inputs`, `Preconditions`, `Steps`, `Acceptance Criteria`, `Verification`, `Failure Modes And Fallbacks`, `Notes`
+1. **Format lock**: require a strict, copy/pasteable output format:
+   - Prefer checklists over prose.
+   - Include at least one concrete example of the *expected output* (a sample artifact path, JSON shape, or curl command).
 1. **Acceptance criteria**: make them binary and observable (file exists, endpoint returns 200, artifact path exists, etc).
 1. **Verification commands**: include copy/paste commands that actually run in this repo:
    - Prefer `make verify`, `make smoke`, `scripts/gate_local.sh`, `curl http://localhost:8000/...`

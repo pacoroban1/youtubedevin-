@@ -27,3 +27,6 @@ datasets/thumbs/images/*
 datasets/thumbs/captions/*
 datasets/thumbs/masks/*
 !datasets/thumbs/**/.gitkeep
+
+# Scratch UI mocks (not part of releases)
+design/uipath_studio_mock/

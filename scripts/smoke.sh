@@ -45,7 +45,7 @@ for i in $(seq 1 60); do
 done
 curl -fsS "${RUNNER_URL}/health" | python3 -m json.tool
 
-echo "[3/5] Runner Gemini voice verification gate..."
+echo "[3/5] Runner voice verification gate..."
 VOICE_TMP="$(mktemp -t voice_verify.XXXXXX.json)"
 curl -fsS "${RUNNER_URL}/api/verify/voice" > "${VOICE_TMP}"
 
@@ -53,10 +53,11 @@ python3 - "${VOICE_TMP}" <<'PY'
 import json, sys
 path = sys.argv[1]
 data = json.load(open(path, "r", encoding="utf-8"))
-ok = data.get("status") == "success" and bool(data.get("gemini_configured"))
+ok = data.get("status") == "success"
 if not ok:
-  raise SystemExit(f"ERROR: Gemini voice verify failed: {data}")
-print("OK: Gemini TTS configured")
+  raise SystemExit(f"ERROR: Voice/TTS verify failed: {data}")
+provider = data.get("provider") or data.get("tts_provider_env") or "unknown"
+print(f"OK: Voice/TTS configured (provider={provider})")
 PY
 
 echo "[4/5] Runner config summary (non-secret)..."
@@ -66,12 +67,19 @@ python3 - "${CONF_TMP}" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], "r", encoding="utf-8"))
 yt = data.get("youtube") or {}
+scout = data.get("scout") or {}
 api_ok = bool(yt.get("api_key_configured"))
 oauth_ok = bool(yt.get("oauth_configured"))
+rss_ok = bool(scout.get("rss_configured"))
+backlog_ok = bool(scout.get("backlog_configured"))
 print("YouTube API key configured:", api_ok)
+print("Scout RSS configured:", rss_ok)
+print("Backlog configured:", backlog_ok)
 print("YouTube OAuth configured:", oauth_ok)
-if not api_ok or not oauth_ok:
-  print("WARN: Full autopilot (discover + upload) requires YOUTUBE_API_KEY + OAuth creds in .env")
+if not api_ok and not rss_ok and not backlog_ok:
+  print("WARN: Auto-discovery is not configured. Set SCOUT_CHANNEL_IDS or YOUTUBE_API_KEY or provide VIDEO_ID manually.")
+if not oauth_ok:
+  print("WARN: Auto-upload is not configured. You can still render assets; set YouTube OAuth creds only if you want autopilot upload.")
 PY
 
 echo "[extra] 10-second ffmpeg encode inside runner container..."

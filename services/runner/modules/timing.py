@@ -9,6 +9,11 @@ import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import logging
+import tempfile
+
+# Lazy-loaded Whisper model for "no English bleed" checks.
+_BLEED_WHISPER_MODEL = None
+_BLEED_WHISPER_MODEL_NAME = None
 
 
 class TimingMatcher:
@@ -68,14 +73,38 @@ class TimingMatcher:
         
         # Step 4: Render final video
         output_file = os.path.join(output_dir, "final_video.mp4")
-        await self._render_video(
+        ok = await self._render_video(
             source_video,
             narration_file,
             output_file,
             alignment_map,
             video_id=video_id,
         )
-        
+        if not ok or (not os.path.exists(output_file)):
+            raise Exception(f"Render failed: output file not created at {output_file}")
+
+        # Step 4b: "No English bleed" gate. If English is detected near the end of the
+        # final mix, auto-retry with the strongest setting (replace original audio).
+        bleed_check = await self._no_english_bleed_check(output_file)
+        retried_replace = False
+        if bleed_check.get("english_detected") and ((os.getenv("AUDIO_MIX_MODE") or "replace").strip().lower() != "replace"):
+            retried_replace = True
+            ok2 = await self._render_video(
+                source_video,
+                narration_file,
+                output_file,
+                alignment_map,
+                video_id=video_id,
+                audio_mode_override="replace",
+            )
+            if not ok2 or (not os.path.exists(output_file)):
+                raise Exception(f"Render retry failed (replace mode): output file not created at {output_file}")
+            bleed_check2 = await self._no_english_bleed_check(output_file)
+            bleed_check = {**bleed_check2, "retried_replace": True}
+
+        if bleed_check.get("english_detected"):
+            raise Exception(f"No-English-Bleed gate failed: {bleed_check}")
+
         # Step 5: Calculate alignment score
         alignment_score = self._calculate_alignment_score(alignment_map, scene_cuts)
         
@@ -90,7 +119,7 @@ class TimingMatcher:
             "output_file_path": output_file,
             "duration_seconds": duration,
             "scene_alignment_score": alignment_score,
-            "quality_check_passed": quality_passed
+            "quality_check_passed": bool(quality_passed) and (not bleed_check.get("english_detected", False))
         }
         
         render_id = self.db.save_render(video_id, audio_data["id"], render_data)
@@ -99,10 +128,13 @@ class TimingMatcher:
         return {
             "render_id": render_id,
             "output_file": output_file,
+            "output_url": f"/api/media/output/{video_id}/final_video.mp4",
             "duration": duration,
             "alignment_score": alignment_score,
             "scene_count": len(scene_cuts),
-            "quality_passed": quality_passed
+            "quality_passed": bool(quality_passed) and (not bleed_check.get("english_detected", False)),
+            "no_english_bleed": bleed_check,
+            "retried_replace": retried_replace,
         }
     
     async def _find_source_video(self, video_dir: str) -> Optional[str]:
@@ -263,6 +295,7 @@ class TimingMatcher:
         alignment_map: List[Dict],
         *,
         video_id: Optional[str] = None,
+        audio_mode_override: Optional[str] = None,
     ) -> bool:
         """
         Render final video with narration and (optionally) selective original-audio "breathing" windows.
@@ -291,7 +324,16 @@ class TimingMatcher:
                 video_filter = "null"
             
             # Build ffmpeg command
-            audio_mode = (os.getenv("AUDIO_MIX_MODE") or "replace").strip().lower()
+            audio_mode = (audio_mode_override or os.getenv("AUDIO_MIX_MODE") or "replace").strip().lower()
+
+            # Final mix loudness normalization (single-pass; best-effort).
+            try:
+                final_i = float(os.getenv("FINAL_TARGET_LUFS") or "-14")
+                final_tp = float(os.getenv("FINAL_TRUE_PEAK") or "-1.5")
+                final_lra = float(os.getenv("FINAL_LRA") or "11")
+            except Exception:
+                final_i, final_tp, final_lra = -14.0, -1.5, 11.0
+            final_norm = f"loudnorm=I={final_i}:TP={final_tp}:LRA={final_lra}"
 
             # Mix tuning (safe defaults: mostly narration, occasional original audio windows)
             # Default outside-window gain is 0.0 to fully mute the source audio by default.
@@ -463,7 +505,7 @@ class TimingMatcher:
                 return (
                     f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume='{orig_expr}':eval=frame[orig];"
                     f"[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume='{nar_gain}*({nar_expr})':eval=frame[nar];"
-                    f"[orig][nar]amix=inputs=2:duration=shortest:dropout_transition=0,alimiter=limit=0.98[aout]"
+                    f"[orig][nar]amix=inputs=2:duration=shortest:dropout_transition=0,{final_norm},alimiter=limit=0.98[aout]"
                 )
 
             filter_complex = _build_audio_filtergraph()
@@ -479,6 +521,8 @@ class TimingMatcher:
             else:
                 # Replace mode (legacy): narration replaces original audio entirely.
                 cmd += ["-map", "0:v", "-map", "1:a"]
+                # Normalize + hard-limit final audio even in replace mode.
+                cmd += ["-filter:a", f"{final_norm},alimiter=limit=0.98"]
 
             # Apply video speed adjustment when audio is longer than video.
             # (Previously computed but not actually applied.)
@@ -491,6 +535,7 @@ class TimingMatcher:
                 "-crf", "23",
                 "-c:a", "aac",           # Audio codec
                 "-b:a", "192k",
+                "-movflags", "+faststart",
                 "-shortest",             # End when shortest stream ends
                 "-y",                    # Overwrite output
                 output_file
@@ -540,6 +585,99 @@ class TimingMatcher:
         except Exception as e:
             print(f"Video render error: {e}")
             return False
+
+    async def _no_english_bleed_check(self, video_path: str) -> Dict[str, Any]:
+        """
+        Best-effort "no English bleed" check.
+
+        We sample the last ~10% (clamped) of the final video's audio, and use Whisper's
+        language detection. If it detects English with high confidence, we fail the gate.
+        """
+        enabled = (os.getenv("NO_ENGLISH_BLEED_CHECK") or "1").strip().lower() not in ("0", "false", "no", "off")
+        if not enabled:
+            return {"checked": False, "english_detected": False, "reason": "disabled"}
+
+        dur = await self._get_video_duration(video_path)
+        if not dur or dur <= 0:
+            return {"checked": False, "english_detected": False, "reason": "unknown_duration"}
+
+        # Segment selection: last 10% of the timeline, clamped.
+        seg_len = max(8.0, min(25.0, float(dur) * 0.10))
+        start = max(0.0, float(dur) - seg_len)
+
+        # Threshold: require reasonably high confidence before we auto-fail.
+        try:
+            th = float(os.getenv("ENGLISH_BLEED_PROB_THRESHOLD") or "0.60")
+        except Exception:
+            th = 0.60
+
+        with tempfile.NamedTemporaryFile(prefix="bleed_", suffix=".wav", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ss",
+                str(start),
+                "-t",
+                str(seg_len),
+                "-i",
+                video_path,
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                tmp_path,
+            ]
+            subprocess.run(cmd, check=True)
+
+            lang, prob = self._whisper_detect_language(tmp_path)
+            english = (lang == "en" and (prob is None or float(prob) >= th))
+            return {
+                "checked": True,
+                "english_detected": bool(english),
+                "detected_language": lang,
+                "language_prob": prob,
+                "threshold": th,
+                "sample_start_sec": start,
+                "sample_duration_sec": seg_len,
+            }
+        except Exception as e:
+            # Fail closed: if the check is enabled but cannot run, we surface it.
+            return {"checked": True, "english_detected": True, "error": f"bleed_check_failed: {e}"}
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _whisper_detect_language(self, wav_path: str) -> tuple[Optional[str], Optional[float]]:
+        global _BLEED_WHISPER_MODEL, _BLEED_WHISPER_MODEL_NAME
+        model_name = (os.getenv("BLEED_CHECK_WHISPER_MODEL") or "tiny").strip() or "tiny"
+        try:
+            import whisper  # type: ignore
+        except Exception:
+            raise RuntimeError("whisper_unavailable")
+
+        if _BLEED_WHISPER_MODEL is None or _BLEED_WHISPER_MODEL_NAME != model_name:
+            _BLEED_WHISPER_MODEL = whisper.load_model(model_name)
+            _BLEED_WHISPER_MODEL_NAME = model_name
+
+        audio = whisper.load_audio(wav_path)
+        audio = whisper.pad_or_trim(audio)
+        mel = whisper.log_mel_spectrogram(audio).to(_BLEED_WHISPER_MODEL.device)
+        _, probs = _BLEED_WHISPER_MODEL.detect_language(mel)
+        if not probs:
+            # Treat "no confident speech detected" as non-English for bleed purposes.
+            return None, 0.0
+        lang = max(probs, key=probs.get)
+        return lang, float(probs.get(lang) or 0.0)
     
     def _calculate_alignment_score(
         self,

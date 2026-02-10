@@ -1,0 +1,74 @@
+{
+  "name": "Amharic Recap - Produce From YouTube URL (VM-first)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "produce-from-url",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "produce-from-url"
+    },
+    {
+      "parameters": {
+        "jsCode": "function extractVideoId(raw) {\n  const s = String(raw || '').trim();\n  if (!s) return { video_id: '', error: 'missing_url' };\n\n  // Accept a raw video id directly.\n  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return { video_id: s };\n\n  try {\n    const u = new URL(s);\n    const host = (u.hostname || '').toLowerCase();\n    const path = u.pathname || '';\n\n    // https://youtu.be/<id>\n    if (host.includes('youtu.be')) {\n      const parts = path.split('/').filter(Boolean);\n      const vid = parts[0] || '';\n      return { video_id: (vid || '').split('?')[0].split('&')[0] };\n    }\n\n    // https://www.youtube.com/shorts/<id>\n    if (path.startsWith('/shorts/')) {\n      const vid = path.split('/shorts/')[1]?.split('/')?.[0] || '';\n      return { video_id: (vid || '').split('?')[0].split('&')[0] };\n    }\n\n    // https://www.youtube.com/watch?v=<id>\n    const v = u.searchParams.get('v') || '';\n    if (v) return { video_id: v };\n\n    return { video_id: '', error: 'could_not_parse_video_id' };\n  } catch (e) {\n    return { video_id: '', error: 'invalid_url' };\n  }\n}\n\nfunction sleep(ms) {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\nasync function httpJson(options) {\n  try {\n    const data = await this.helpers.request({ ...options, json: true });\n    return { ok: true, data };\n  } catch (e) {\n    const statusCode = e.statusCode || e.status || null;\n    const errBody = e.error || e.response?.body || null;\n    return { ok: false, statusCode, error: errBody, message: e.message || String(e) };\n  }\n}\n\nfunction pickBody(inputJson) {\n  // Webhook body is usually under `body`.\n  const b = (inputJson && typeof inputJson === 'object' ? (inputJson.body || inputJson) : {}) || {};\n  return b;\n}\n\nfunction toQS(params) {\n  const entries = Object.entries(params || {}).filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== '');\n  if (!entries.length) return '';\n  return '?' + entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&');\n}\n\nconst body = pickBody($json);\nconst input = body.url || body.youtube_url || body.video_url || body.video_id;\nconst voice_provider = body.voice_provider;\nconst voice_id = body.voice_id;\n\nconst parsed = extractVideoId(input);\nconst video_id = parsed.video_id;\nif (!video_id) {\n  return [{ json: { status: 'failed', step: 'parse_video_id', error: parsed.error || 'parse_failed', input: String(input || '') } }];\n}\n\nconst BASE = 'http://runner:8000';\nconst steps = [];\n\n// 0) Verify voice configuration (VM truth)\n{\n  const r = await httpJson.call(this, { method: 'GET', uri: `${BASE}/api/verify/voice`, timeout: 30000 });\n  steps.push({ step: 'verify_voice', ok: r.ok, statusCode: r.statusCode, data: r.data, error: r.error, message: r.message });\n  if (!r.ok || !r.data || r.data.status !== 'success') {\n    return [{ json: { status: 'failed', step: 'verify_voice', video_id, details: r, steps } }];\n  }\n}\n\n// 1) Ingest\n{\n  const r = await httpJson.call(this, { method: 'POST', uri: `${BASE}/api/ingest/${video_id}`, timeout: 600000 });\n  steps.push({ step: 'ingest', ok: r.ok, statusCode: r.statusCode, data: r.data, error: r.error, message: r.message });\n  if (!r.ok || !r.data || r.data.status !== 'success') {\n    return [{ json: { status: 'failed', step: 'ingest', video_id, details: r, steps } }];\n  }\n}\n\n// 2) Script (retry once with force=1)\nlet scriptOut = null;\n{\n  const callScript = async (force) => {\n    const qs = force ? '?force=1' : '';\n    return httpJson.call(this, { method: 'POST', uri: `${BASE}/api/script/${video_id}${qs}`, timeout: 300000 });\n  };\n\n  let r = await callScript(false);\n  steps.push({ step: 'script', ok: r.ok, statusCode: r.statusCode, data: r.data, error: r.error, message: r.message });\n  if (!r.ok || !r.data || r.data.status !== 'success') {\n    r = await callScript(true);\n    steps.push({ step: 'script_retry', ok: r.ok, statusCode: r.statusCode, data: r.data, error: r.error, message: r.message });\n  }\n\n  if (!r.ok || !r.data || r.data.status !== 'success') {\n    return [{ json: { status: 'failed', step: 'script', video_id, details: r, steps } }];\n  }\n  scriptOut = r.data;\n}\n\n// 3) Voice (retry once with force=1)\nlet voiceOut = null;\n{\n  const qsBase = toQS({ voice_provider, voice_id });\n  const callVoice = async (force) => {\n    const qs = toQS({ voice_provider, voice_id, force: force ? 1 : undefined });\n    return httpJson.call(this, { method: 'POST', uri: `${BASE}/api/voice/${video_id}${qs}`, timeout: 600000 });\n  };\n\n  let r = await callVoice(false);\n  steps.push({ step: 'voice', ok: r.ok, statusCode: r.statusCode, data: r.data, error: r.error, message: r.message });\n  if (!r.ok || !r.data || r.data.status !== 'success') {\n    r = await callVoice(true);\n    steps.push({ step: 'voice_retry', ok: r.ok, statusCode: r.statusCode, data: r.data, error: r.error, message: r.message });\n  }\n\n  if (!r.ok || !r.data || r.data.status !== 'success') {\n    return [{ json: { status: 'failed', step: 'voice', video_id, details: r, steps } }];\n  }\n  voiceOut = r.data;\n}\n\n// 4) Render (retry once)\nlet renderOut = null;\n{\n  const callRender = async () => {\n    return httpJson.call(this, { method: 'POST', uri: `${BASE}/api/render/${video_id}`, timeout: 1800000 });\n  };\n\n  let r = await callRender();\n  steps.push({ step: 'render', ok: r.ok, statusCode: r.statusCode, data: r.data, error: r.error, message: r.message });\n\n  if (!r.ok || !r.data || r.data.status !== 'success') {\n    await sleep(5000);\n    r = await callRender();\n    steps.push({ step: 'render_retry', ok: r.ok, statusCode: r.statusCode, data: r.data, error: r.error, message: r.message });\n  }\n\n  if (!r.ok || !r.data || r.data.status !== 'success') {\n    return [{ json: { status: 'failed', step: 'render', video_id, details: r, steps } }];\n  }\n  renderOut = r.data;\n}\n\nconst output_url = (renderOut && renderOut.output_url) || `/api/media/output/${video_id}/final_video.mp4`;\n\nreturn [\n  {\n    json: {\n      status: 'success',\n      video_id,\n      input_url: String(input || ''),\n      output_url,\n      source_url: `http://localhost:8000/api/media/videos/${video_id}/${video_id}.mp4`,\n      final_url: `http://localhost:8000${output_url}`,\n      download_url: `http://localhost:8000${output_url}`,\n      narration_url: voiceOut?.narration_url ? `http://localhost:8000${voiceOut.narration_url}` : null,\n      narration_normalized_url: voiceOut?.narration_normalized_url ? `http://localhost:8000${voiceOut.narration_normalized_url}` : null,\n      no_english_bleed: renderOut?.no_english_bleed || null,\n      script_quality_score: scriptOut?.quality_score || null,\n      steps\n    }\n  }\n];\n"
+      },
+      "id": "produce-pipeline",
+      "name": "Produce (Runner Pipeline)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [780, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Produce (Runner Pipeline)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Produce (Runner Pipeline)": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["amharic-recap", "vm-first", "production"],
+  "triggerCount": 1,
+  "updatedAt": "2026-02-10T00:00:00.000Z",
+  "versionId": "1"
+}
+

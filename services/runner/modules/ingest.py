@@ -37,9 +37,38 @@ class VideoIngest:
         # Create video directory
         video_dir = os.path.join(self.media_dir, "videos", video_id)
         os.makedirs(video_dir, exist_ok=True)
-        
-        # Step 1: Download video with yt-dlp
-        video_path = await self._download_video(video_id, video_dir)
+
+        # Idempotency: if we already have a usable transcript in DB and a source video
+        # on disk, return it without re-downloading/re-transcribing.
+        existing_t = self.db.get_transcript(video_id) or {}
+        existing_source = (existing_t.get("source") or "").strip()
+        existing_lang = (existing_t.get("language_detected") or "").strip() or None
+        has_existing_text = bool((existing_t.get("cleaned_transcript") or "").strip()) or bool((existing_t.get("raw_transcript") or "").strip())
+
+        # Find an existing downloaded video file, if any.
+        existing_video_path = None
+        for ext in ("mp4", "mkv", "webm"):
+            p = os.path.join(video_dir, f"{video_id}.{ext}")
+            if os.path.exists(p):
+                existing_video_path = p
+                break
+
+        if has_existing_text and existing_video_path:
+            try:
+                self.db.update_video_status(video_id, "ingested")
+            except Exception:
+                pass
+            return {
+                "video_id": video_id,
+                "video_path": existing_video_path,
+                "source": existing_source or "unknown",
+                "language": existing_lang or "unknown",
+                "transcript_length": len((existing_t.get("cleaned_transcript") or "") or (existing_t.get("raw_transcript") or "")),
+                "cached": True,
+            }
+
+        # Step 1: Download video with yt-dlp (or re-use if already present)
+        video_path = existing_video_path or (await self._download_video(video_id, video_dir))
         
         if not video_path:
             raise Exception(f"Failed to download video {video_id}")

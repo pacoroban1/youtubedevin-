@@ -69,6 +69,11 @@ class Database:
     def save_video(self, video_data: Dict[str, Any]) -> bool:
         with self.get_session() as session:
             try:
+                # Defensive: videos.title is NOT NULL in the schema. Ensure we always
+                # provide a non-empty string even if upstream metadata is missing.
+                vid = (video_data.get("video_id") or "").strip()
+                title = (str(video_data.get("title") or "").strip() or (f"Video {vid}" if vid else "Video"))
+
                 session.execute(text("""
                     INSERT INTO videos (
                         video_id, channel_id, title, description, view_count,
@@ -87,7 +92,7 @@ class Database:
                 """), {
                     "video_id": video_data["video_id"],
                     "channel_id": video_data.get("channel_id"),
-                    "title": video_data["title"],
+                    "title": title,
                     "description": video_data.get("description", ""),
                     "view_count": video_data.get("view_count", 0),
                     "like_count": video_data.get("like_count", 0),

@@ -133,6 +133,10 @@ class FullPipelineRequest(BaseModel):
     auto_select: bool = True
     # Optional: override narrator voice for this run (Gemini prebuilt voice name).
     voice_name: Optional[str] = None
+    # Optional: override TTS provider ("elevenlabs" or "gemini").
+    voice_provider: Optional[str] = None
+    # Optional: provider-specific voice id (e.g. ElevenLabs voice_id).
+    voice_id: Optional[str] = None
     # Optional discovery tuning (used when auto_select=true and no video_id is provided).
     queries: Optional[List[str]] = None
     top_n_channels: int = 10
@@ -162,6 +166,8 @@ class TranslateRequest(BaseModel):
 class TTSPreviewRequest(BaseModel):
     text: str
     voice_name: Optional[str] = None
+    voice_provider: Optional[str] = None
+    voice_id: Optional[str] = None
 
 class AudioWindow(BaseModel):
     start_time: float
@@ -325,7 +331,15 @@ async def _run_pipeline_full_job(job_id: str, request: FullPipelineRequest) -> N
         # Execution
         await run_step("ingest", lambda: ingest.process_video(video_id))
         await run_step("script", lambda: script_gen.generate_full_script(video_id))
-        await run_step("voice", lambda: voice_gen.generate_narration(video_id, voice_name=request.voice_name))
+        await run_step(
+            "voice",
+            lambda: voice_gen.generate_narration(
+                video_id,
+                voice_name=request.voice_name,
+                voice_provider=request.voice_provider,
+                voice_id=request.voice_id,
+            ),
+        )
         await run_step("render", lambda: timing.render_with_alignment(video_id))
         await run_step("thumbnail", lambda: thumbnail_gen.generate_thumbnails(video_id))
         await run_step("upload", lambda: uploader.upload_video(video_id))
@@ -352,10 +366,20 @@ async def root():
 @app.get("/api/config")
 async def get_config(request: Request):
     """Non-secret config summary."""
+    scout_channel_ids = (os.getenv("SCOUT_CHANNEL_IDS") or "").strip()
+    scout_channels_count = 0
+    if scout_channel_ids:
+        scout_channels_count = len([p for p in re.split(r"[,\s]+", scout_channel_ids) if p.strip()])
     return _json(request, 200, {
         "narrator_persona": (os.getenv("NARRATOR_PERSONA") or "futuristic captain").strip(),
         "zthumb": {
             "enabled": False,
+        },
+        "scout": {
+            # Scout can run without YouTube Data API by using RSS feeds + yt-dlp metadata.
+            "rss_configured": bool(scout_channel_ids),
+            "rss_channels_count": scout_channels_count,
+            "backlog_configured": bool((os.getenv("BACKLOG_VIDEO_IDS") or "").strip()),
         },
         "youtube": {
             "api_key_configured": bool((os.getenv("YOUTUBE_API_KEY") or "").strip()),
@@ -443,13 +467,12 @@ async def generate_full_script(video_id: str, request: Request, force: bool = Fa
 @app.post("/api/voice/{video_id}") # Alias
 async def generate_tts(video_id: str, request: Request, force: bool = False, voice_name: Optional[str] = None):
     """Generate narration audio."""
-    if not (os.getenv("GEMINI_API_KEY") or "").strip():
-        return _json(request, 400, {"status": "error", "error": "missing_env", "message": "GEMINI_API_KEY is required", "video_id": video_id})
-
     # Idempotent: if we already generated audio for this video, return it instead
     # of re-running TTS (which can be slow / flaky / expensive).
-    # If a voice_name override is provided, bypass cache and regenerate.
-    if (not force) and (not voice_name):
+    # If any override is provided, bypass cache and regenerate.
+    voice_provider = (request.query_params.get("voice_provider") or "").strip() or None
+    voice_id = (request.query_params.get("voice_id") or "").strip() or None
+    if (not force) and (not voice_name) and (not voice_provider) and (not voice_id):
         try:
             tts_path = MEDIA_DIR / "tts" / f"{video_id}.wav"
             narration_path = MEDIA_DIR / "audio" / video_id / "narration.wav"
@@ -495,7 +518,7 @@ async def generate_tts(video_id: str, request: Request, force: bool = False, voi
     except Exception as e:
         return _json(request, 502, {"status": "error", "error": "precondition_failed", "message": str(e), "video_id": video_id})
 
-    out = await voice_gen.generate_narration(video_id, voice_name=voice_name)
+    out = await voice_gen.generate_narration(video_id, voice_name=voice_name, voice_provider=voice_provider, voice_id=voice_id)
     if isinstance(out, dict) and out.get("status") == "error":
         code = 400 if out.get("error") == "missing_env" else 502
         return _json(request, code, out)
@@ -504,20 +527,40 @@ async def generate_tts(video_id: str, request: Request, force: bool = False, voi
 @app.get("/api/tts/voices")
 async def list_tts_voices(request: Request):
     """
-    List known Gemini prebuilt voice names. This is a convenience endpoint for auditioning.
+    List known voices for configured TTS providers. Convenience endpoint for auditioning.
     """
-    voices = ["Puck", "Kore", "Aoede", "Charon", "Fenrir", "Leda"]
-    default_voice = (os.getenv("GEMINI_TTS_VOICE_NAME") or "Puck").strip() or "Puck"
-    return _json(request, 200, {"status": "success", "voices": voices, "default_voice": default_voice})
+    gemini_voices = ["Puck", "Kore", "Aoede", "Charon", "Fenrir", "Leda"]
+    default_gemini = (os.getenv("GEMINI_TTS_VOICE_NAME") or "Puck").strip() or "Puck"
+
+    providers: List[Dict[str, Any]] = [
+        {"provider": "gemini", "voices": gemini_voices, "default_voice": default_gemini},
+    ]
+
+    # Best-effort: include ElevenLabs voices if configured.
+    if (os.getenv("ELEVENLABS_API_KEY") or "").strip():
+        try:
+            # internal helper (async) via voice generator; if it fails, omit quietly
+            eleven_voices = await voice_gen._elevenlabs_list_voices()  # type: ignore[attr-defined]
+            providers.append(
+                {
+                    "provider": "elevenlabs",
+                    "voices": eleven_voices,
+                    "default_voice_id": (os.getenv("ELEVENLABS_VOICE_ID") or "").strip() or None,
+                    "default_model_id": (os.getenv("ELEVENLABS_MODEL_ID") or "eleven_multilingual_v2").strip(),
+                }
+            )
+        except Exception:
+            pass
+
+    active_provider = (os.getenv("TTS_PROVIDER") or "").strip().lower() or None
+    return _json(request, 200, {"status": "success", "providers": providers, "active_provider": active_provider})
 
 @app.post("/api/tts_preview")
 async def preview_tts(body: TTSPreviewRequest, request: Request):
     """
     Generate a short TTS preview clip for quick voice auditioning.
     """
-    if not (os.getenv("GEMINI_API_KEY") or "").strip():
-        return _json(request, 400, {"status": "error", "error": "missing_env", "message": "GEMINI_API_KEY is required"})
-    out = await voice_gen.generate_preview(body.text, voice_name=body.voice_name)
+    out = await voice_gen.generate_preview(body.text, voice_name=body.voice_name, voice_provider=body.voice_provider, voice_id=body.voice_id)
     if isinstance(out, dict) and out.get("status") == "error":
         code = 400 if out.get("error") in ("missing_env", "empty_text") else 502
         return _json(request, code, out)
@@ -671,7 +714,12 @@ async def run_pipeline_full(request: FullPipelineRequest, http_request: Request)
             try:
                 attempt_results["ingest"] = await ingest.process_video(video_id)
                 attempt_results["script"] = await script_gen.generate_full_script(video_id)
-                attempt_results["voice"] = await voice_gen.generate_narration(video_id, voice_name=request.voice_name)
+                attempt_results["voice"] = await voice_gen.generate_narration(
+                    video_id,
+                    voice_name=request.voice_name,
+                    voice_provider=request.voice_provider,
+                    voice_id=request.voice_id,
+                )
                 attempt_results["render"] = await timing.render_with_alignment(video_id)
                 attempt_results["thumbnail"] = await thumbnail_gen.generate_thumbnails(video_id)
                 attempt_results["upload"] = await uploader.upload_video(video_id)
@@ -829,14 +877,34 @@ async def daily_report(request: Request):
 
 @app.get("/api/verify/voice")
 async def verify_voice(request: Request):
+    tts_provider = (os.getenv("TTS_PROVIDER") or "").strip().lower()
+    eleven_ok = bool((os.getenv("ELEVENLABS_API_KEY") or "").strip()) and bool((os.getenv("ELEVENLABS_VOICE_ID") or "").strip())
+    gemini_ok = gemini.is_configured()
+
+    # "Configured enough" depends on the chosen provider. If none is chosen, accept either.
+    if tts_provider == "elevenlabs":
+        ok = eleven_ok
+        provider = "elevenlabs"
+        note = "TTS provider is ElevenLabs; checks ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID (no secrets)."
+    elif tts_provider == "gemini":
+        ok = gemini_ok
+        provider = "gemini"
+        note = "TTS provider is Gemini; checks GEMINI_API_KEY presence (no secrets)."
+    else:
+        ok = eleven_ok or gemini_ok
+        provider = "auto"
+        note = "TTS provider is auto; prefers ElevenLabs when configured, otherwise Gemini."
+
     return _json(
         request,
         200,
         {
-            "status": "success" if gemini.is_configured() else "error",
-            "provider": "gemini",
-            "gemini_configured": gemini.is_configured(),
-            "note": "TTS is Gemini-only; endpoint checks GEMINI_API_KEY presence (no secrets).",
+            "status": "success" if ok else "error",
+            "provider": provider,
+            "tts_provider_env": tts_provider or None,
+            "elevenlabs_configured": eleven_ok,
+            "gemini_configured": gemini_ok,
+            "note": note,
         },
     )
 
