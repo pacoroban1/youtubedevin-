@@ -41,7 +41,10 @@ cp .env.example .env
 make up
 ```
 
-4. Access the n8n dashboard at http://localhost:5678
+4. Access:
+   - n8n dashboard: http://localhost:5678
+   - runner API: http://localhost:8000
+   - UI dashboard: http://localhost:8000/ui
 
 ### Environment Variables
 
@@ -60,6 +63,9 @@ See `.env.example` for all required variables:
 | `TELEGRAM_CHANNEL_ID` | (Optional) Telegram channel ID |
 | `TWITTER_*` | (Optional) Twitter API credentials |
 | `ZTHUMB_URL` | (Optional) ZThumb local thumbnail engine URL |
+| `ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI` | (Optional) Allow paid DALL·E fallback if ZThumb is configured but unavailable |
+| `Z_LORA_PATH` | (Optional) ZThumb LoRA adapter path (inside ZThumb container) |
+| `Z_LORA_SCALE` | (Optional) ZThumb LoRA scale (default recommended ~0.8) |
 
 ## Services
 
@@ -189,6 +195,60 @@ curl -X POST http://localhost:8100/generate \
 ### Integration with Autopilot
 
 Set `ZTHUMB_URL=http://localhost:8100` in your `.env` file to use ZThumb for thumbnail generation instead of OpenAI DALL-E.
+If you're running the runner via Docker (default), `localhost` inside the container is not your host. The runner will automatically retry common host aliases when it detects a localhost `ZTHUMB_URL`.
+By default, if `ZTHUMB_URL` is set and ZThumb is down, thumbnail generation fails (so you can retry) instead of silently paying for DALL·E.
+To opt into the paid fallback explicitly, set `ALLOW_THUMBNAIL_FALLBACK_TO_OPENAI=true`.
+
+### LoRA Fine-Tune (Optional)
+
+ZThumb can load a LoRA adapter at inference time:
+
+```bash
+export Z_LORA_PATH=/outputs/lora/zthumb_lora
+export Z_LORA_SCALE=0.8
+```
+
+And you can run the end-to-end loop:
+
+```bash
+make train_lora
+make eval_lora
+make run_zthumb
+make test_generate
+```
+
+## Translation + Persona Recap (Optional)
+
+By default, the script module uses Gemini to generate a high-retention Amharic recap directly.
+
+If you want a more "structured" approach:
+1. Generate short English beat recaps + emotion labels
+2. Translate those beats using Google Cloud Translation API (paid) or LibreTranslate (open-source)
+3. Run a final Gemini pass to apply narrator persona + cinematic emotion + `[PAUSE]` markers
+
+Enable it by setting:
+
+```bash
+export GOOGLE_CLOUD_API_KEY=...
+export TRANSLATION_PROVIDER=google
+export NARRATOR_PERSONA="futuristic captain"
+export SCRIPT_BEAT_SECONDS=20
+```
+
+Or with LibreTranslate:
+
+```bash
+export LIBRETRANSLATE_URL=http://localhost:5000
+export TRANSLATION_PROVIDER=libretranslate
+export NARRATOR_PERSONA="futuristic captain"
+export SCRIPT_BEAT_SECONDS=20
+```
+
+Verification endpoint:
+
+```bash
+curl http://localhost:8000/api/verify/translate
+```
 
 ## File Structure
 

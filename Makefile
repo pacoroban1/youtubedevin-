@@ -1,4 +1,4 @@
-.PHONY: up down logs build clean test shell
+.PHONY: up down logs build clean test shell zthumb-up zthumb-down smoke run_zthumb train_lora eval_lora test_generate
 
 # Start all services
 up:
@@ -71,6 +71,35 @@ health:
 	@curl -s http://localhost:8000/health || echo "Runner: DOWN"
 	@curl -s http://localhost:5678/healthz || echo "n8n: DOWN"
 	@docker-compose exec postgres pg_isready -U autopilot || echo "PostgreSQL: DOWN"
+
+# Start ZThumb local thumbnail engine
+zthumb-up:
+	cd zthumb && ./run_zthumb.sh
+
+# Alias (per training/inference workflow docs)
+run_zthumb: zthumb-up
+
+# Stop ZThumb local thumbnail engine
+zthumb-down:
+	cd zthumb && (docker compose down || docker-compose down)
+
+# One-button local smoke test (ZThumb + voice support + ffmpeg)
+smoke:
+	./scripts/smoke.sh
+
+# Build training image (auto-select cpu/cuda) and train LoRA.
+# Customize:
+#   TIER=12gb STEPS=1500 LR=1e-4 RANK=16 OUTPUT=outputs/lora/zthumb_lora make train_lora
+train_lora:
+	@./scripts/train_lora.sh
+
+# Evaluate LoRA (before/after grids + TRAINING_REPORT.md)
+eval_lora:
+	@./scripts/eval_lora.sh
+
+# Call ZThumb API and copy 4 generated images into outputs/test_generate/
+test_generate:
+	@./scripts/test_generate.sh
 
 # Import n8n workflows
 import-workflows:
